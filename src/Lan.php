@@ -119,6 +119,15 @@ class Lan
     /**
      * @param  array<string, mixed>  $params
      */
+    /**
+     * Start a just-dispatched queue job now instead of on the worker's next
+     * idle poll (up to 3s away on Android).
+     */
+    public function wakeQueue(): void
+    {
+        $this->call('Lan.WakeQueue', []);
+    }
+
     private function call(string $method, array $params): ?string
     {
         if (! function_exists('nativephp_call')) {

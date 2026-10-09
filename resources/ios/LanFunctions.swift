@@ -22,6 +22,13 @@ enum LanFunctions {
         }
     }
 
+    /// Android-only nudge for the queue worker; nothing to do on iOS.
+    class WakeQueue: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            return BridgeResponse.success(data: ["ok": false])
+        }
+    }
+
     class StopDiscovery: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
             LanManager.shared.stopDiscovery()

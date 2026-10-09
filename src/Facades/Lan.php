@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @method static void startDiscovery(array $deviceInfo)
  * @method static void stopDiscovery()
+ * @method static void wakeQueue()
  * @method static int|null startServer(array $deviceInfo, string $incomingDir, ?string $certPem = null, ?string $keyPem = null, ?string $publicFolder = null)
  * @method static void stopServer()
  * @method static void respond(string $requestId, array $acceptedFileIds, ?string $sessionId = null, int $status = 200)

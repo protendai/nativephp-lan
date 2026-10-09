@@ -117,6 +117,19 @@ object LanFunctions {
         }
     }
 
+    /**
+     * Cut short the queue worker's idle sleep so a just-dispatched job starts
+     * now. NativePHP's PHPQueueWorker polls every 3s when idle and treats an
+     * interrupt during its sleep as "poll again immediately".
+     */
+    class WakeQueue(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            val worker = Thread.getAllStackTraces().keys.firstOrNull { it.name == "php-queue-worker" }
+            worker?.interrupt()
+            return mapOf("ok" to (worker != null))
+        }
+    }
+
     /** Open a received content:// URI (Downloads/Tumira) in the system viewer. */
     class OpenFile(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {

@@ -9,7 +9,8 @@
         { "name": "Lan.CancelSession", "ios": "LanFunctions.CancelSession", "android": "com.tuma.lan.LanFunctions.CancelSession" },
         { "name": "Lan.LocalIp", "ios": "LanFunctions.LocalIp", "android": "com.tuma.lan.LanFunctions.LocalIp" },
         { "name": "Lan.OpenFile", "ios": "LanFunctions.OpenFile", "android": "com.tuma.lan.LanFunctions.OpenFile" },
-        { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" }
+        { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" },
+        { "name": "Lan.WakeQueue", "ios": "LanFunctions.WakeQueue", "android": "com.tuma.lan.LanFunctions.WakeQueue" }
     ],
     "events": [
         "Tuma\\Lan\\Events\\PeerFound",
