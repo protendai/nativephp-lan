@@ -94,12 +94,14 @@ class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0
 
         val total = session.headers["content-length"]?.toLongOrNull() ?: -1L
         val input = session.inputStream
-        val buffer = ByteArray(64 * 1024)
+        // Big chunks + a 1 MB write buffer: storage writes on Android go through
+        // scoped-storage FUSE, where many small writes cost far more than few big ones.
+        val buffer = ByteArray(512 * 1024)
         var received = 0L
         var lastEmit = 0L
 
         try {
-            target.output.use { output ->
+            target.output.buffered(1 shl 20).use { output ->
                 while (total < 0 || received < total) {
                     val toRead = if (total in 0..(received + buffer.size)) (total - received).toInt() else buffer.size
                     if (toRead <= 0) break
@@ -109,7 +111,8 @@ class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0
                     received += read
 
                     val now = System.currentTimeMillis()
-                    if (now - lastEmit >= 250) {
+                    // Each progress event costs PHP a DB write and a re-render; twice a second is plenty.
+                    if (now - lastEmit >= 500) {
                         manager.emitProgress(sessionId, fileId, received, if (total > 0) total else received)
                         lastEmit = now
                     }

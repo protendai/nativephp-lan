@@ -261,6 +261,27 @@ object LanManager {
     fun attach(activity: FragmentActivity) {
         activityRef = activity
         appContext = activity.applicationContext
+        holdWifiAwake()
+    }
+
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    /**
+     * Keep Wi-Fi out of power-save while the app runs. Without this Android
+     * dozes the radio between beacons and transfers crawl. Low-latency mode
+     * only applies while the app is in the foreground with the screen on.
+     */
+    @Suppress("DEPRECATION")
+    private fun holdWifiAwake() {
+        if (wifiLock?.isHeld == true) return
+        val wifi = appContext?.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        val mode = if (android.os.Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        wifiLock = runCatching {
+            wifi.createWifiLock(mode, "tuma-transfer").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.onFailure { Log.w(TAG, "wifi lock failed", it) }.getOrNull()
     }
 
     // ── Discovery ────────────────────────────────────────────────
