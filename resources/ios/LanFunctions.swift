@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Network
 import UIKit
@@ -19,6 +20,39 @@ enum LanFunctions {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
             LanManager.shared.startDiscovery(deviceInfo: parameters["deviceInfo"] as? [String: Any] ?? [:])
             return BridgeResponse.success(data: ["ok": true])
+        }
+    }
+
+    /// Write a small JPEG preview of an image or video file to `dest`.
+    class Thumbnail: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            guard let source = parameters["source"] as? String,
+                  let dest = parameters["dest"] as? String else {
+                return BridgeResponse.success(data: ["ok": false])
+            }
+            let mime = parameters["mime"] as? String ?? ""
+            let edge = CGFloat((parameters["size"] as? NSNumber)?.doubleValue ?? 256)
+            let target = CGSize(width: edge, height: edge)
+
+            var image: UIImage?
+            if mime.hasPrefix("video/") {
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: URL(fileURLWithPath: source)))
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = target
+                if let frame = try? generator.copyCGImage(at: .zero, actualTime: nil) {
+                    image = UIImage(cgImage: frame)
+                }
+            } else {
+                image = UIImage(contentsOfFile: source)?.preparingThumbnail(of: target)
+            }
+
+            guard let data = image?.jpegData(compressionQuality: 0.8) else {
+                return BridgeResponse.success(data: ["ok": false])
+            }
+            let url = URL(fileURLWithPath: dest)
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let ok = (try? data.write(to: url)) != nil
+            return BridgeResponse.success(data: ["ok": ok])
         }
     }
 

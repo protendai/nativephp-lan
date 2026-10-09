@@ -10,6 +10,7 @@
         { "name": "Lan.LocalIp", "ios": "LanFunctions.LocalIp", "android": "com.tuma.lan.LanFunctions.LocalIp" },
         { "name": "Lan.OpenFile", "ios": "LanFunctions.OpenFile", "android": "com.tuma.lan.LanFunctions.OpenFile" },
         { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" },
+        { "name": "Lan.Thumbnail", "ios": "LanFunctions.Thumbnail", "android": "com.tuma.lan.LanFunctions.Thumbnail" },
         { "name": "Lan.WakeQueue", "ios": "LanFunctions.WakeQueue", "android": "com.tuma.lan.LanFunctions.WakeQueue" }
     ],
     "events": [

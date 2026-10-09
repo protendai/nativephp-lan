@@ -120,6 +120,18 @@ class Lan
      * @param  array<string, mixed>  $params
      */
     /**
+     * Write a JPEG preview (about $size px on the long edge) of an image or
+     * video to $dest. $source is a file path or, on Android, a content:// URI.
+     */
+    public function thumbnail(string $source, string $dest, ?string $mime = null, int $size = 256): bool
+    {
+        $result = $this->call('Lan.Thumbnail', ['source' => $source, 'dest' => $dest, 'mime' => $mime, 'size' => $size]);
+        $decoded = $result !== null ? json_decode($result, true) : null;
+
+        return (bool) ($decoded['ok'] ?? false);
+    }
+
+    /**
      * Start a just-dispatched queue job now instead of on the worker's next
      * idle poll (up to 3s away on Android).
      */

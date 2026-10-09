@@ -4,11 +4,14 @@ import android.app.UiModeManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.media.ThumbnailUtils
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Size
 import androidx.fragment.app.FragmentActivity
 import com.nativephp.mobile.bridge.BridgeFunction
 import com.nativephp.mobile.utils.NativeActionCoordinator
@@ -127,6 +130,39 @@ object LanFunctions {
             val worker = Thread.getAllStackTraces().keys.firstOrNull { it.name == "php-queue-worker" }
             worker?.interrupt()
             return mapOf("ok" to (worker != null))
+        }
+    }
+
+    /**
+     * Write a small JPEG preview of an image or video to `dest`. `source` is a
+     * file path or a content:// URI. Videos cost one decoded frame, not playback.
+     */
+    class Thumbnail(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            val source = parameters["source"] as? String ?: return mapOf("ok" to false)
+            val dest = parameters["dest"] as? String ?: return mapOf("ok" to false)
+            val mime = parameters["mime"] as? String ?: ""
+            val edge = (parameters["size"] as? Number)?.toInt() ?: 256
+            val size = Size(edge, edge)
+
+            val bitmap = runCatching {
+                if (source.startsWith("content://")) {
+                    activity.contentResolver.loadThumbnail(Uri.parse(source), size, null)
+                } else if (mime.startsWith("video/")) {
+                    ThumbnailUtils.createVideoThumbnail(File(source), size, null)
+                } else {
+                    ThumbnailUtils.createImageThumbnail(File(source), size, null)
+                }
+            }.onFailure { Log.w(LanManager.TAG, "thumbnail failed for $source", it) }.getOrNull()
+                ?: return mapOf("ok" to false)
+
+            val written = runCatching {
+                File(dest).parentFile?.mkdirs()
+                File(dest).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+            }.getOrDefault(false)
+            bitmap.recycle()
+
+            return mapOf("ok" to written)
         }
     }
 
