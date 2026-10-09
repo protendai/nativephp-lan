@@ -121,6 +121,32 @@ object LanFunctions {
     }
 
     /**
+     * Open the system document picker with multiple selection. Answers with
+     * FilesPicking { count } then FilesPicked { files } (see PickFilesFragment).
+     */
+    class PickFiles(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            LanManager.attach(activity)
+            val mimeTypes = stringList(parameters["mimeTypes"]).ifEmpty { listOf("*/*") }
+            PickFilesFragment.launch(activity, mimeTypes.toTypedArray())
+            return mapOf("ok" to true)
+        }
+    }
+
+    /**
+     * The system photo picker with multiple selection (photos and videos).
+     * Same FilesPicking / FilesPicked events as PickFiles; copying happens
+     * off the UI thread so a large video never freezes the app.
+     */
+    class PickMedia(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            LanManager.attach(activity)
+            PickFilesFragment.launchMedia(activity)
+            return mapOf("ok" to true)
+        }
+    }
+
+    /**
      * Cut short the queue worker's idle sleep so a just-dispatched job starts
      * now. NativePHP's PHPQueueWorker polls every 3s when idle and treats an
      * interrupt during its sleep as "poll again immediately".

@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static void startDiscovery(array $deviceInfo)
  * @method static void stopDiscovery()
  * @method static void wakeQueue()
+ * @method static void pickFiles(array $mimeTypes = []) Multi-select document picker (defaults to any type)
+ * @method static void pickMedia() Multi-select photo/video picker
  * @method static bool thumbnail(string $source, string $dest, ?string $mime = null, int $size = 256)
  * @method static int|null startServer(array $deviceInfo, string $incomingDir, ?string $certPem = null, ?string $keyPem = null, ?string $publicFolder = null)
  * @method static void stopServer()

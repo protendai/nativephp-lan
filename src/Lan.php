@@ -132,6 +132,27 @@ class Lan
     }
 
     /**
+     * Open the system document picker with multiple selection. Answers with a
+     * FilesPicking event (how many were chosen) and then FilesPicked once each
+     * file has been copied somewhere PHP can read it.
+     *
+     * @param  list<string>  $mimeTypes
+     */
+    public function pickFiles(array $mimeTypes = ['*/*']): void
+    {
+        $this->call('Lan.PickFiles', ['mimeTypes' => array_values($mimeTypes)]);
+    }
+
+    /**
+     * Open the system photo picker (photos and videos) with multiple
+     * selection. Same FilesPicking / FilesPicked events as pickFiles().
+     */
+    public function pickMedia(): void
+    {
+        $this->call('Lan.PickMedia', []);
+    }
+
+    /**
      * Start a just-dispatched queue job now instead of on the worker's next
      * idle poll (up to 3s away on Android).
      */

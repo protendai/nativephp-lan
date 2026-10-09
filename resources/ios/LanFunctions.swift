@@ -56,6 +56,20 @@ enum LanFunctions {
         }
     }
 
+    /// Android-only for now: the multi-select picker. iOS keeps the single-file picker.
+    class PickFiles: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            return BridgeResponse.success(data: ["ok": false])
+        }
+    }
+
+    /// Android-only for now: the multi-select photo/video picker.
+    class PickMedia: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            return BridgeResponse.success(data: ["ok": false])
+        }
+    }
+
     /// Android-only nudge for the queue worker; nothing to do on iOS.
     class WakeQueue: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {

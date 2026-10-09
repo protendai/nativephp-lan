@@ -11,6 +11,8 @@
         { "name": "Lan.OpenFile", "ios": "LanFunctions.OpenFile", "android": "com.tuma.lan.LanFunctions.OpenFile" },
         { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" },
         { "name": "Lan.Thumbnail", "ios": "LanFunctions.Thumbnail", "android": "com.tuma.lan.LanFunctions.Thumbnail" },
+        { "name": "Lan.PickFiles", "ios": "LanFunctions.PickFiles", "android": "com.tuma.lan.LanFunctions.PickFiles" },
+        { "name": "Lan.PickMedia", "ios": "LanFunctions.PickMedia", "android": "com.tuma.lan.LanFunctions.PickMedia" },
         { "name": "Lan.WakeQueue", "ios": "LanFunctions.WakeQueue", "android": "com.tuma.lan.LanFunctions.WakeQueue" }
     ],
     "events": [
@@ -20,7 +22,9 @@
         "Tuma\\Lan\\Events\\UploadProgress",
         "Tuma\\Lan\\Events\\UploadComplete",
         "Tuma\\Lan\\Events\\SessionCancelled",
-        "Tuma\\Lan\\Events\\ServerError"
+        "Tuma\\Lan\\Events\\ServerError",
+        "Tuma\\Lan\\Events\\FilesPicking",
+        "Tuma\\Lan\\Events\\FilesPicked"
     ],
     "android": {
         "permissions": [
