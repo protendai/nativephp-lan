@@ -1,0 +1,44 @@
+{
+    "namespace": "Lan",
+    "bridge_functions": [
+        { "name": "Lan.StartDiscovery", "ios": "LanFunctions.StartDiscovery", "android": "com.tuma.lan.LanFunctions.StartDiscovery" },
+        { "name": "Lan.StopDiscovery", "ios": "LanFunctions.StopDiscovery", "android": "com.tuma.lan.LanFunctions.StopDiscovery" },
+        { "name": "Lan.StartServer", "ios": "LanFunctions.StartServer", "android": "com.tuma.lan.LanFunctions.StartServer" },
+        { "name": "Lan.StopServer", "ios": "LanFunctions.StopServer", "android": "com.tuma.lan.LanFunctions.StopServer" },
+        { "name": "Lan.Respond", "ios": "LanFunctions.Respond", "android": "com.tuma.lan.LanFunctions.Respond" },
+        { "name": "Lan.CancelSession", "ios": "LanFunctions.CancelSession", "android": "com.tuma.lan.LanFunctions.CancelSession" },
+        { "name": "Lan.LocalIp", "ios": "LanFunctions.LocalIp", "android": "com.tuma.lan.LanFunctions.LocalIp" },
+        { "name": "Lan.OpenFile", "ios": "LanFunctions.OpenFile", "android": "com.tuma.lan.LanFunctions.OpenFile" },
+        { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" }
+    ],
+    "events": [
+        "Tuma\\Lan\\Events\\PeerFound",
+        "Tuma\\Lan\\Events\\PeerLost",
+        "Tuma\\Lan\\Events\\UploadRequested",
+        "Tuma\\Lan\\Events\\UploadProgress",
+        "Tuma\\Lan\\Events\\UploadComplete",
+        "Tuma\\Lan\\Events\\SessionCancelled",
+        "Tuma\\Lan\\Events\\ServerError"
+    ],
+    "android": {
+        "permissions": [
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.ACCESS_WIFI_STATE",
+            "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+        ],
+        "dependencies": {
+            "implementation": [
+                "org.nanohttpd:nanohttpd:2.3.1"
+            ]
+        },
+        "min_version": 26
+    },
+    "ios": {
+        "info_plist": {
+            "NSLocalNetworkUsageDescription": "Tumira finds nearby devices on your Wi-Fi to send and receive files.",
+            "NSBonjourServices": ["_localsend._tcp"]
+        },
+        "min_version": 18
+    }
+}

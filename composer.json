@@ -1,0 +1,26 @@
+{
+    "name": "tuma/mobile-lan",
+    "description": "LocalSend-compatible LAN discovery and receive listener for NativePHP Mobile.",
+    "type": "nativephp-plugin",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Tuma\\Lan\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Tuma\\Lan\\LanServiceProvider"
+            ]
+        },
+        "nativephp": {
+            "manifest": "nativephp.json"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
