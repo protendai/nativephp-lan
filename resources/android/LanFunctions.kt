@@ -73,7 +73,7 @@ object LanFunctions {
     class Respond(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             val requestId = parameters["requestId"] as? String ?: return mapOf("ok" to false)
-            val accepted = (parameters["acceptedFileIds"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            val accepted = stringList(parameters["acceptedFileIds"])
             val sessionId = parameters["sessionId"] as? String
             val status = (parameters["status"] as? Number)?.toInt() ?: 200
             LanManager.respond(requestId, accepted, sessionId, status)
@@ -149,12 +149,24 @@ object LanFunctions {
     }
 }
 
-/** Convert a decoded bridge param (Map) into a JSONObject we can hold/serve. */
+/**
+ * Convert a decoded bridge param into a JSONObject we can hold/serve. The
+ * bridge passes nested PHP arrays as JSONObject, not Map.
+ */
 private fun mapToJson(value: Any?): JSONObject =
     when (value) {
+        is JSONObject -> value
         is Map<*, *> -> JSONObject(value.entries.associate { (k, v) -> k.toString() to (v ?: JSONObject.NULL) })
         is String -> runCatching { JSONObject(value) }.getOrDefault(JSONObject())
         else -> JSONObject()
+    }
+
+/** A bridge param PHP sent as a list: JSONArray from the bridge, or a List. */
+private fun stringList(value: Any?): List<String> =
+    when (value) {
+        is JSONArray -> (0 until value.length()).mapNotNull { value.opt(it) as? String }
+        is List<*> -> value.filterIsInstance<String>()
+        else -> emptyList()
     }
 
 /**

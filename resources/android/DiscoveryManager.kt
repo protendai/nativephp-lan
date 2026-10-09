@@ -54,12 +54,15 @@ class DiscoveryManager(
         thread(name = "tuma-discovery") {
             try {
                 val wifiInterface = wifiInterface()
+                // Built outside apply {}: inside it, `port` is MulticastSocket.getPort() (-1 while unconnected).
+                val bindAddress = InetSocketAddress(port)
+                val groupAddress = InetSocketAddress(group, port)
                 val listenSocket = MulticastSocket(null).apply {
                     reuseAddress = true
-                    bind(InetSocketAddress(port))
+                    bind(bindAddress)
                     if (wifiInterface != null) {
                         networkInterface = wifiInterface
-                        joinGroup(InetSocketAddress(group, port), wifiInterface)
+                        joinGroup(groupAddress, wifiInterface)
                     } else {
                         joinGroup(group)
                     }
