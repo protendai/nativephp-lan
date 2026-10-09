@@ -155,7 +155,7 @@ final class LanManager {
     private init() {}
 
     static let multicastGroup = "224.0.0.167"
-    static let multicastPort: UInt16 = 53317
+    static let multicastPort: UInt16 = 53480
 
     private var deviceInfo: [String: Any] = [:]
     private var incomingDir: String?
@@ -191,7 +191,7 @@ final class LanManager {
         self.incomingDir = incomingDir
         try? FileManager.default.createDirectory(atPath: incomingDir, withIntermediateDirectories: true)
 
-        let preferred = (deviceInfo["port"] as? Int) ?? 53317
+        let preferred = (deviceInfo["port"] as? Int) ?? 53480
         stopServer()
 
         var lastError: Error?

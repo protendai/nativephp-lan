@@ -52,7 +52,7 @@ class Lan
             return null;
         }
 
-        return (int) ($decoded['port'] ?? $deviceInfo['port'] ?? 53317);
+        return (int) ($decoded['port'] ?? $deviceInfo['port'] ?? 53480);
     }
 
     public function stopServer(): void

@@ -5,13 +5,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The receiving half of LocalSend v2, served on 0.0.0.0:{port}. Bodies stream
+ * The receiving half of the Tumira LAN protocol (LocalSend-derived, own port/paths), served on 0.0.0.0:{port}. Bodies stream
  * straight to disk; only metadata and progress numbers cross the bridge back
  * to PHP as events.
  */
 class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0.0.0", port) {
 
-    private val apiPrefix = "/api/localsend/v2/"
+    private val apiPrefix = "/api/tumira/v1/"
 
     override fun serve(session: IHTTPSession): Response {
         val path = session.uri.removeSuffix("/")
@@ -34,7 +34,7 @@ class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0
 
     private fun handleRegister(session: IHTTPSession): Response {
         val body = readJsonBody(session)
-        if (body != null) {
+        if (body != null && body.optString("app") == LanManager.APP_ID) {
             manager.emitPeerFound(body)
         }
         return json(Response.Status.OK, manager.deviceInfoJson())
@@ -116,13 +116,16 @@ class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0
                 }
             }
         } catch (e: Exception) {
+            // Connection dropped mid-stream (sender cancelled, left Wi-Fi, app killed).
             target.discard()
+            manager.cancelSession(sessionId, "interrupted")
             throw e
         }
 
         // The sender hung up (or cancelled) before the declared length: drop the partial file.
         if (total > 0 && received < total) {
             target.discard()
+            manager.cancelSession(sessionId, "interrupted")
             return json(Response.Status.BAD_REQUEST, JSONObject().put("message", "incomplete upload"))
         }
 
@@ -135,8 +138,10 @@ class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0
 
     private fun handleCancel(session: IHTTPSession): Response {
         val sessionId = session.parameters["sessionId"]?.firstOrNull()
-        if (sessionId != null) {
-            manager.cancelSession(sessionId, "sender")
+        val fingerprint = session.parameters["fingerprint"]?.firstOrNull()
+        when {
+            sessionId != null -> manager.cancelSession(sessionId, "sender")
+            fingerprint != null -> manager.cancelPendingFrom(fingerprint)
         }
         return json(Response.Status.OK, JSONObject())
     }

@@ -16,15 +16,16 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
- * UDP multicast discovery, LocalSend style: announce our device info to
- * 224.0.0.167:53317 every 5s and listen for other devices' announcements,
+ * UDP multicast discovery: announce our device info to
+ * 224.0.0.167:53480 every 5s and listen for other devices' announcements,
  * emitting PeerFound for each. Needs a held MulticastLock or most Wi-Fi
  * chipsets drop multicast frames.
  *
  * The socket is pinned to the Wi-Fi interface: left to the default route,
  * Android joins/sends on mobile data and peers never hear us. Because many
  * routers drop multicast anyway, start() also sweeps the /24 over HTTP
- * (GET /api/localsend/v2/info), like LocalSend's fallback scan.
+ * (GET /api/tumira/v1/info). Only devices announcing app=tumira count, so
+ * LocalSend and other apps on the same group never show up.
  */
 class DiscoveryManager(
     private val context: Context,
@@ -115,7 +116,7 @@ class DiscoveryManager(
     }.getOrNull()
 
     /**
-     * Probe every host on our /24 for a LocalSend info endpoint. Raw sockets
+     * Probe every host on our /24 for a Tumira info endpoint. Raw sockets
      * rather than HttpURLConnection so Android's cleartext policy can't block it.
      */
     private fun scanSubnet() {
@@ -145,7 +146,7 @@ class DiscoveryManager(
         Socket().use { socket ->
             socket.connect(InetSocketAddress(host, targetPort), 400)
             socket.soTimeout = 1500
-            val request = "GET /api/localsend/v2/info?fingerprint=$myFingerprint HTTP/1.1\r\n" +
+            val request = "GET /api/tumira/v1/info?fingerprint=$myFingerprint HTTP/1.1\r\n" +
                 "Host: $host:$targetPort\r\nConnection: close\r\n\r\n"
             socket.getOutputStream().apply { write(request.toByteArray()); flush() }
             val response = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
@@ -155,6 +156,7 @@ class DiscoveryManager(
     }.getOrNull()
 
     private fun emitPeer(info: JSONObject, ip: String) {
+        if (info.optString("app") != LanManager.APP_ID) return
         val fingerprint = info.optString("fingerprint")
         if (fingerprint.isEmpty() || fingerprint == myFingerprint) return
 
@@ -164,7 +166,7 @@ class DiscoveryManager(
             .put("alias", info.optString("alias"))
             .put("fingerprint", fingerprint)
             .put("ip", ip)
-            .put("port", info.optInt("port", 53317))
+            .put("port", info.optInt("port", 53480))
             .put("protocol", info.optString("protocol", "http"))
             .put("deviceModel", info.optString("deviceModel"))
             .put("deviceType", info.optString("deviceType"))

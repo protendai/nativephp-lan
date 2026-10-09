@@ -226,7 +226,10 @@ object LanManager {
 
     const val TAG = "TumaLan"
     const val MULTICAST_GROUP = "224.0.0.167"
-    const val MULTICAST_PORT = 53317
+    const val MULTICAST_PORT = 53480
+
+    /** Marker every Tumira device-info carries; anything else is ignored. */
+    const val APP_ID = "tumira"
 
     private var appContext: Context? = null
     private var activityRef: FragmentActivity? = null
@@ -287,7 +290,7 @@ object LanManager {
         publicFolder = folder
         File(dir).mkdirs()
 
-        val preferred = info.optInt("port", 53317)
+        val preferred = info.optInt("port", 53480)
         stopServer()
 
         var lastError: Exception? = null
@@ -324,7 +327,7 @@ object LanManager {
 
     fun parkUploadRequest(sender: JSONObject, files: JSONArray, pinProvided: String?): PendingRequest {
         val requestId = UUID.randomUUID().toString()
-        val request = PendingRequest(requestId, files)
+        val request = PendingRequest(requestId, files, sender.optString("fingerprint"))
         pending[requestId] = request
 
         val payload = JSONObject()
@@ -460,6 +463,20 @@ object LanManager {
         dispatch("SessionCancelled", JSONObject().put("sessionId", sessionId).put("reason", reason))
     }
 
+    /**
+     * The sender withdrew before anyone answered: release its parked
+     * prepare-upload (replying 403) and tell PHP to close the prompt.
+     */
+    fun cancelPendingFrom(fingerprint: String) {
+        if (fingerprint.isEmpty()) return
+        for (request in pending.values.filter { it.senderFingerprint == fingerprint }) {
+            pending.remove(request.requestId)
+            request.status = 403
+            request.latch.countDown()
+            dispatch("SessionCancelled", JSONObject().put("requestId", request.requestId).put("reason", "sender"))
+        }
+    }
+
     fun emitProgress(sessionId: String, fileId: String, received: Long, total: Long) {
         dispatch(
             "UploadProgress",
@@ -515,7 +532,7 @@ object LanManager {
     }
 
     /** A parked prepare-upload request, blocking the HTTP thread until PHP answers. */
-    class PendingRequest(val requestId: String, val files: JSONArray) {
+    class PendingRequest(val requestId: String, val files: JSONArray, val senderFingerprint: String) {
         val latch = CountDownLatch(1)
         var status: Int = 403
         var acceptedFileIds: List<String> = emptyList()

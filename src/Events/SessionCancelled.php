@@ -10,10 +10,14 @@ class SessionCancelled
     use Dispatchable, SerializesModels;
 
     /**
-     * @param  string|null  $reason  One of: sender, timeout, error.
+     * A session ended early, or (with only $requestId) a sender withdrew a
+     * send request before it was answered.
+     *
+     * @param  string|null  $reason  One of: sender, interrupted, timeout, error.
      */
     public function __construct(
         public ?string $sessionId = null,
         public ?string $reason = null,
+        public ?string $requestId = null,
     ) {}
 }

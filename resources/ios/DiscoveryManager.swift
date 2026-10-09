@@ -1,8 +1,8 @@
 import Foundation
 import Network
 
-/// UDP multicast discovery, LocalSend style: announce our device info to
-/// 224.0.0.167:53317 every 5s and emit PeerFound for every other device's
+/// UDP multicast discovery: announce our device info to
+/// 224.0.0.167:53480 every 5s and emit PeerFound for every other device's
 /// announcement. The first multicast use triggers the iOS local-network
 /// permission prompt, which is why discovery starts from StartDiscovery
 /// rather than at launch.
@@ -62,6 +62,7 @@ final class DiscoveryManager {
 
     private func handle(_ content: Data) {
         guard let info = (try? JSONSerialization.jsonObject(with: content)) as? [String: Any] else { return }
+        guard (info["app"] as? String) == "tumira" else { return }
         let fingerprint = (info["fingerprint"] as? String) ?? ""
         if fingerprint.isEmpty || fingerprint == myFingerprint { return }
 
@@ -72,7 +73,7 @@ final class DiscoveryManager {
             "alias": info["alias"] as? String ?? "",
             "fingerprint": fingerprint,
             "ip": info["ip"] as? String ?? "",
-            "port": info["port"] as? Int ?? 53317,
+            "port": info["port"] as? Int ?? 53480,
             "protocol": info["protocol"] as? String ?? "http",
             "deviceModel": info["deviceModel"] as? String ?? "",
             "deviceType": info["deviceType"] as? String ?? "",

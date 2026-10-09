@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// The receiving half of LocalSend v2, served over a hand-rolled HTTP/1.1
+/// The receiving half of the Tumira LAN protocol, served over a hand-rolled HTTP/1.1
 /// listener (NWListener). JSON routes buffer their small bodies; the upload
 /// route streams straight to disk. Only metadata and progress cross back to
 /// PHP as events.
@@ -69,7 +69,7 @@ private final class HttpConnection {
 
     private let connection: NWConnection
     private let manager: LanManager
-    private let apiPrefix = "/api/localsend/v2/"
+    private let apiPrefix = "/api/tumira/v1/"
 
     private var buffer = Data()
     private var headersParsed = false

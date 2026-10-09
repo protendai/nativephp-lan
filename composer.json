@@ -1,6 +1,6 @@
 {
     "name": "tuma/mobile-lan",
-    "description": "LocalSend-compatible LAN discovery and receive listener for NativePHP Mobile.",
+    "description": "Tumira LAN discovery and receive listener for NativePHP Mobile.",
     "type": "nativephp-plugin",
     "license": "MIT",
     "require": {
