@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @method static void startDiscovery(array $deviceInfo)
  * @method static void stopDiscovery()
+ * @method static bool wifiEnabled()
  * @method static void wakeQueue()
  * @method static void pickFiles(array $mimeTypes = []) Multi-select document picker (defaults to any type)
  * @method static void pickMedia() Multi-select photo/video picker

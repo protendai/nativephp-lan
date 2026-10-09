@@ -92,6 +92,14 @@ object LanFunctions {
         }
     }
 
+    /** Whether the Wi-Fi radio is on. Joining a network isn't needed: phones pair directly. */
+    class WifiEnabled(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            val wifi = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            return mapOf("enabled" to (wifi?.isWifiEnabled ?: true))
+        }
+    }
+
     class LocalIp(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             LanManager.attach(activity)

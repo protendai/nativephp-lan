@@ -20,6 +20,17 @@ class Lan
         $this->call('Lan.StartDiscovery', ['deviceInfo' => $deviceInfo]);
     }
 
+    /**
+     * Whether the Wi-Fi radio is switched on. True when unknown (no bridge, iOS).
+     */
+    public function wifiEnabled(): bool
+    {
+        $result = $this->call('Lan.WifiEnabled', []);
+        $decoded = $result !== null ? json_decode($result, true) : null;
+
+        return (bool) ($decoded['enabled'] ?? true);
+    }
+
     public function stopDiscovery(): void
     {
         $this->call('Lan.StopDiscovery', []);

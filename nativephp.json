@@ -8,6 +8,7 @@
         { "name": "Lan.Respond", "ios": "LanFunctions.Respond", "android": "com.tuma.lan.LanFunctions.Respond" },
         { "name": "Lan.CancelSession", "ios": "LanFunctions.CancelSession", "android": "com.tuma.lan.LanFunctions.CancelSession" },
         { "name": "Lan.LocalIp", "ios": "LanFunctions.LocalIp", "android": "com.tuma.lan.LanFunctions.LocalIp" },
+        { "name": "Lan.WifiEnabled", "ios": "LanFunctions.WifiEnabled", "android": "com.tuma.lan.LanFunctions.WifiEnabled" },
         { "name": "Lan.OpenFile", "ios": "LanFunctions.OpenFile", "android": "com.tuma.lan.LanFunctions.OpenFile" },
         { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" },
         { "name": "Lan.Thumbnail", "ios": "LanFunctions.Thumbnail", "android": "com.tuma.lan.LanFunctions.Thumbnail" },

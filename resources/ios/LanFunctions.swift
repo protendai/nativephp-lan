@@ -128,6 +128,13 @@ enum LanFunctions {
         }
     }
 
+    /// iOS gives apps no Wi-Fi radio state; assume on.
+    class WifiEnabled: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            return BridgeResponse.success(data: ["enabled": true])
+        }
+    }
+
     class LocalIp: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
             return BridgeResponse.success(data: ["ip": LanManager.shared.localIp() ?? ""])
