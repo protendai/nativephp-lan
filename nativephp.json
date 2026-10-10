@@ -1,22 +1,86 @@
 {
     "namespace": "Lan",
     "bridge_functions": [
-        { "name": "Lan.StartDiscovery", "ios": "LanFunctions.StartDiscovery", "android": "com.tuma.lan.LanFunctions.StartDiscovery" },
-        { "name": "Lan.SweepSubnet", "ios": "LanFunctions.SweepSubnet", "android": "com.tuma.lan.LanFunctions.SweepSubnet" },
-        { "name": "Lan.Announce", "ios": "LanFunctions.Announce", "android": "com.tuma.lan.LanFunctions.Announce" },
-        { "name": "Lan.StopDiscovery", "ios": "LanFunctions.StopDiscovery", "android": "com.tuma.lan.LanFunctions.StopDiscovery" },
-        { "name": "Lan.StartServer", "ios": "LanFunctions.StartServer", "android": "com.tuma.lan.LanFunctions.StartServer" },
-        { "name": "Lan.StopServer", "ios": "LanFunctions.StopServer", "android": "com.tuma.lan.LanFunctions.StopServer" },
-        { "name": "Lan.Respond", "ios": "LanFunctions.Respond", "android": "com.tuma.lan.LanFunctions.Respond" },
-        { "name": "Lan.CancelSession", "ios": "LanFunctions.CancelSession", "android": "com.tuma.lan.LanFunctions.CancelSession" },
-        { "name": "Lan.LocalIp", "ios": "LanFunctions.LocalIp", "android": "com.tuma.lan.LanFunctions.LocalIp" },
-        { "name": "Lan.WifiEnabled", "ios": "LanFunctions.WifiEnabled", "android": "com.tuma.lan.LanFunctions.WifiEnabled" },
-        { "name": "Lan.OpenFile", "ios": "LanFunctions.OpenFile", "android": "com.tuma.lan.LanFunctions.OpenFile" },
-        { "name": "Lan.SetAppearance", "ios": "LanFunctions.SetAppearance", "android": "com.tuma.lan.LanFunctions.SetAppearance" },
-        { "name": "Lan.Thumbnail", "ios": "LanFunctions.Thumbnail", "android": "com.tuma.lan.LanFunctions.Thumbnail" },
-        { "name": "Lan.PickFiles", "ios": "LanFunctions.PickFiles", "android": "com.tuma.lan.LanFunctions.PickFiles" },
-        { "name": "Lan.PickMedia", "ios": "LanFunctions.PickMedia", "android": "com.tuma.lan.LanFunctions.PickMedia" },
-        { "name": "Lan.WakeQueue", "ios": "LanFunctions.WakeQueue", "android": "com.tuma.lan.LanFunctions.WakeQueue" }
+        {
+            "name": "Lan.StartDiscovery",
+            "ios": "LanFunctions.StartDiscovery",
+            "android": "com.tuma.lan.LanFunctions.StartDiscovery"
+        },
+        {
+            "name": "Lan.SweepSubnet",
+            "ios": "LanFunctions.SweepSubnet",
+            "android": "com.tuma.lan.LanFunctions.SweepSubnet"
+        },
+        {
+            "name": "Lan.Announce",
+            "ios": "LanFunctions.Announce",
+            "android": "com.tuma.lan.LanFunctions.Announce"
+        },
+        {
+            "name": "Lan.StopDiscovery",
+            "ios": "LanFunctions.StopDiscovery",
+            "android": "com.tuma.lan.LanFunctions.StopDiscovery"
+        },
+        {
+            "name": "Lan.StartServer",
+            "ios": "LanFunctions.StartServer",
+            "android": "com.tuma.lan.LanFunctions.StartServer"
+        },
+        {
+            "name": "Lan.StopServer",
+            "ios": "LanFunctions.StopServer",
+            "android": "com.tuma.lan.LanFunctions.StopServer"
+        },
+        {
+            "name": "Lan.Respond",
+            "ios": "LanFunctions.Respond",
+            "android": "com.tuma.lan.LanFunctions.Respond"
+        },
+        {
+            "name": "Lan.CancelSession",
+            "ios": "LanFunctions.CancelSession",
+            "android": "com.tuma.lan.LanFunctions.CancelSession"
+        },
+        {
+            "name": "Lan.LocalIp",
+            "ios": "LanFunctions.LocalIp",
+            "android": "com.tuma.lan.LanFunctions.LocalIp"
+        },
+        {
+            "name": "Lan.WifiEnabled",
+            "ios": "LanFunctions.WifiEnabled",
+            "android": "com.tuma.lan.LanFunctions.WifiEnabled"
+        },
+        {
+            "name": "Lan.OpenFile",
+            "ios": "LanFunctions.OpenFile",
+            "android": "com.tuma.lan.LanFunctions.OpenFile"
+        },
+        {
+            "name": "Lan.SetAppearance",
+            "ios": "LanFunctions.SetAppearance",
+            "android": "com.tuma.lan.LanFunctions.SetAppearance"
+        },
+        {
+            "name": "Lan.Thumbnail",
+            "ios": "LanFunctions.Thumbnail",
+            "android": "com.tuma.lan.LanFunctions.Thumbnail"
+        },
+        {
+            "name": "Lan.PickFiles",
+            "ios": "LanFunctions.PickFiles",
+            "android": "com.tuma.lan.LanFunctions.PickFiles"
+        },
+        {
+            "name": "Lan.PickMedia",
+            "ios": "LanFunctions.PickMedia",
+            "android": "com.tuma.lan.LanFunctions.PickMedia"
+        },
+        {
+            "name": "Lan.WakeQueue",
+            "ios": "LanFunctions.WakeQueue",
+            "android": "com.tuma.lan.LanFunctions.WakeQueue"
+        }
     ],
     "events": [
         "Tuma\\Lan\\Events\\PeerFound",
@@ -47,10 +111,15 @@
     "ios": {
         "info_plist": {
             "NSLocalNetworkUsageDescription": "Tumira finds nearby devices on your Wi-Fi to send and receive files.",
-            "NSBonjourServices": ["_tumira._tcp"],
+            "NSBonjourServices": [
+                "_tumira._tcp"
+            ],
             "UIFileSharingEnabled": true,
             "LSSupportsOpeningDocumentsInPlace": true
         },
         "min_version": 18
+    },
+    "hooks": {
+        "post_compile": "tuma:lan:privacy-manifest"
     }
 }
