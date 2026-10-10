@@ -282,8 +282,8 @@ final class LanManager {
 
         try? fm.createDirectory(at: documents.appendingPathComponent("Tumira", isDirectory: true), withIntermediateDirectories: true)
 
-        for internal in ["app", "app.zip", ".DS_Store"] {
-            var url = documents.appendingPathComponent(internal)
+        for hiddenName in ["app", "app.zip", ".DS_Store"] {
+            var url = documents.appendingPathComponent(hiddenName)
             guard fm.fileExists(atPath: url.path) else { continue }
             var values = URLResourceValues()
             values.isHidden = true
