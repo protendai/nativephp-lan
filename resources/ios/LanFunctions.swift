@@ -57,16 +57,18 @@ enum LanFunctions {
     }
 
     /// Android-only for now: the multi-select picker. iOS keeps the single-file picker.
+    /// Params: mimeTypes (optional). Answers with FilesPicking then FilesPicked.
     class PickFiles: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
-            return BridgeResponse.success(data: ["ok": false])
+            let mimeTypes = parameters["mimeTypes"] as? [String] ?? ["*/*"]
+            return BridgeResponse.success(data: ["ok": TumaPickers.shared.presentDocuments(mimeTypes: mimeTypes)])
         }
     }
 
-    /// Android-only for now: the multi-select photo/video picker.
+    /// Multi-select photo/video picker. Answers with FilesPicking then FilesPicked.
     class PickMedia: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
-            return BridgeResponse.success(data: ["ok": false])
+            return BridgeResponse.success(data: ["ok": TumaPickers.shared.presentMedia()])
         }
     }
 
@@ -234,6 +236,7 @@ final class LanManager {
         self.deviceInfo = deviceInfo
         self.incomingDir = incomingDir
         try? FileManager.default.createDirectory(atPath: incomingDir, withIntermediateDirectories: true)
+        LanManager.prepareFilesAppFolder()
 
         let preferred = (deviceInfo["port"] as? Int) ?? 53480
         stopServer()
@@ -267,6 +270,26 @@ final class LanManager {
 
     func deviceInfoJson() -> [String: Any] { deviceInfo }
     func incomingDirectory() -> String? { incomingDir }
+
+    /// The Files app shows our Documents folder (UIFileSharingEnabled) as
+    /// On My iPhone › Tumira. Received files go to Documents/Tumira; NativePHP
+    /// extracts the Laravel app into Documents/app, which users must not see
+    /// or touch, so mark it hidden (re-applied on every start, since a
+    /// re-extraction recreates it).
+    static func prepareFilesAppFolder() {
+        let fm = FileManager.default
+        guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+
+        try? fm.createDirectory(at: documents.appendingPathComponent("Tumira", isDirectory: true), withIntermediateDirectories: true)
+
+        for internal in ["app", "app.zip", ".DS_Store"] {
+            var url = documents.appendingPathComponent(internal)
+            guard fm.fileExists(atPath: url.path) else { continue }
+            var values = URLResourceValues()
+            values.isHidden = true
+            try? url.setResourceValues(values)
+        }
+    }
 
     // ── prepare-upload parking / respond ─────────────────────────
 

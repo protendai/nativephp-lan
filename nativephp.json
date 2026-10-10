@@ -47,7 +47,9 @@
     "ios": {
         "info_plist": {
             "NSLocalNetworkUsageDescription": "Tumira finds nearby devices on your Wi-Fi to send and receive files.",
-            "NSBonjourServices": ["_tumira._tcp"]
+            "NSBonjourServices": ["_tumira._tcp"],
+            "UIFileSharingEnabled": true,
+            "LSSupportsOpeningDocumentsInPlace": true
         },
         "min_version": 18
     }
