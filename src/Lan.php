@@ -31,6 +31,15 @@ class Lan
         return (bool) ($decoded['enabled'] ?? true);
     }
 
+    /**
+     * Probe one /24 (e.g. "192.168.49", a pairing-code link we host) until a
+     * Tumira device answers or $seconds pass. Answers with PeerFound.
+     */
+    public function sweepSubnet(array $deviceInfo, string $prefix, int $seconds = 20): void
+    {
+        $this->call('Lan.SweepSubnet', ['deviceInfo' => $deviceInfo, 'prefix' => $prefix, 'seconds' => $seconds]);
+    }
+
     public function stopDiscovery(): void
     {
         $this->call('Lan.StopDiscovery', []);

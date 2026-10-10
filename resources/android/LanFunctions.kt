@@ -18,6 +18,7 @@ import com.nativephp.mobile.utils.NativeActionCoordinator
 import fi.iki.elonen.NanoHTTPD
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.concurrent.thread
 import java.io.File
 import java.io.OutputStream
 import java.net.DatagramPacket
@@ -43,6 +44,18 @@ object LanFunctions {
             val deviceInfo = mapToJson(parameters["deviceInfo"])
             LanManager.attach(activity)
             LanManager.startDiscovery(deviceInfo)
+            return mapOf("ok" to true)
+        }
+    }
+
+    /** Params: deviceInfo, prefix ("192.168.49"), seconds. Emits PeerFound for the first Tumira device that answers. */
+    class SweepSubnet(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            val deviceInfo = mapToJson(parameters["deviceInfo"])
+            val prefix = parameters["prefix"] as? String ?: return mapOf("ok" to false)
+            val seconds = (parameters["seconds"] as? Number)?.toInt() ?: 20
+            LanManager.attach(activity)
+            LanManager.sweepSubnet(deviceInfo, prefix, seconds)
             return mapOf("ok" to true)
         }
     }
@@ -325,6 +338,11 @@ object LanManager {
         stopDiscovery()
         val context = appContext ?: return
         discovery = DiscoveryManager(context, info, this).also { it.start() }
+    }
+
+    fun sweepSubnet(info: JSONObject, prefix: String, seconds: Int) {
+        val context = appContext ?: return
+        thread(name = "tuma-sweep") { DiscoveryManager(context, info, this).sweep(prefix, seconds) }
     }
 
     fun stopDiscovery() {

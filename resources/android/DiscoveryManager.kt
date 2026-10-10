@@ -142,6 +142,38 @@ class DiscoveryManager(
         Log.d(LanManager.TAG, "http scan of $prefix.0/24 finished")
     }
 
+    /**
+     * Sweep one /24 (e.g. the Wi-Fi Direct group 192.168.49) in rounds until a
+     * Tumira device answers or the time runs out. Used by a sender hosting a
+     * pairing code: it learns the joining phone's IP this way. Blocking; call
+     * off the main thread.
+     */
+    fun sweep(prefix: String, seconds: Int) {
+        running = true
+        val deadline = System.currentTimeMillis() + seconds * 1000L
+        var found = false
+        Log.d(LanManager.TAG, "sweep of $prefix.0/24 for ${seconds}s")
+        while (!found && System.currentTimeMillis() < deadline) {
+            val pool = Executors.newFixedThreadPool(48)
+            for (host in 2..254) {
+                val target = "$prefix.$host"
+                pool.execute {
+                    probe(target, port)?.let { info ->
+                        if (info.optString("app") == LanManager.APP_ID && info.optString("fingerprint") != myFingerprint) {
+                            found = true
+                            emitPeer(info, target)
+                        }
+                    }
+                }
+            }
+            pool.shutdown()
+            runCatching { pool.awaitTermination(10, TimeUnit.SECONDS) }
+            if (!found) runCatching { Thread.sleep(1500) }
+        }
+        running = false
+        Log.d(LanManager.TAG, "sweep of $prefix.0/24 ${if (found) "found a peer" else "found nothing"}")
+    }
+
     private fun probe(host: String, targetPort: Int): JSONObject? = runCatching {
         Socket().use { socket ->
             socket.connect(InetSocketAddress(host, targetPort), 400)
