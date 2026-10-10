@@ -77,6 +77,29 @@ enum LanFunctions {
         }
     }
 
+    /// Params: deviceInfo, prefix ("192.168.49"), seconds. Emits PeerFound for the first Tumira device that answers.
+    class SweepSubnet: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            guard let prefix = parameters["prefix"] as? String else { return BridgeResponse.success(data: ["ok": false]) }
+            let info = parameters["deviceInfo"] as? [String: Any] ?? [:]
+            let seconds = (parameters["seconds"] as? NSNumber)?.intValue ?? 20
+            LanManager.shared.sweepSubnet(deviceInfo: info, prefix: prefix, seconds: seconds)
+            return BridgeResponse.success(data: ["ok": true])
+        }
+    }
+
+    /// Params: deviceInfo, host, port, seconds. POSTs register until the server answers.
+    class Announce: BridgeFunction {
+        func execute(parameters: [String: Any]) throws -> [String: Any] {
+            guard let host = parameters["host"] as? String else { return BridgeResponse.success(data: ["ok": false]) }
+            let info = parameters["deviceInfo"] as? [String: Any] ?? [:]
+            let port = (parameters["port"] as? NSNumber)?.intValue ?? 53480
+            let seconds = (parameters["seconds"] as? NSNumber)?.intValue ?? 20
+            LanManager.shared.announce(deviceInfo: info, host: host, port: port, seconds: seconds)
+            return BridgeResponse.success(data: ["ok": true])
+        }
+    }
+
     class StopDiscovery: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
             LanManager.shared.stopDiscovery()
@@ -321,6 +344,114 @@ final class LanManager {
     }
 
     func emitPeerFound(_ peer: [String: Any]) { dispatch("PeerFound", peer) }
+
+    // ── Pairing-code helpers (mirror the Android side) ───────────
+
+    /// One raw HTTP/1.1 exchange over TCP (no URLSession, so App Transport
+    /// Security never blocks plain http to a LAN or Wi-Fi Direct address).
+    static func rawHttp(host: String, port: Int, request: Data, timeout: TimeInterval, completion: @escaping (String?) -> Void) {
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { completion(nil); return }
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        let queue = DispatchQueue(label: "com.tuma.lan.http.\(host)")
+        var finished = false
+        let finish: (String?) -> Void = { result in
+            queue.async {
+                if finished { return }
+                finished = true
+                connection.cancel()
+                completion(result)
+            }
+        }
+        var received = Data()
+        func readAll() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+                if let data = data { received.append(data) }
+                if isComplete || error != nil {
+                    finish(String(data: received, encoding: .utf8))
+                } else {
+                    readAll()
+                }
+            }
+        }
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                connection.send(content: request, completion: .contentProcessed { error in
+                    if error != nil { finish(nil) } else { readAll() }
+                })
+            case .failed, .cancelled:
+                finish(nil)
+            case .waiting:
+                finish(nil)
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + timeout) { finish(nil) }
+    }
+
+    func announce(deviceInfo: [String: Any], host: String, port: Int, seconds: Int) {
+        guard let body = try? JSONSerialization.data(withJSONObject: deviceInfo) else { return }
+        var request = Data("POST /api/tumira/v1/register HTTP/1.1\r\nHost: \(host):\(port)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)
+        request.append(body)
+        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+
+        func attempt(_ n: Int) {
+            LanManager.rawHttp(host: host, port: port, request: request, timeout: 3) { response in
+                if let response = response, response.hasPrefix("HTTP/1.1 200") || response.hasPrefix("HTTP/1.0 200") {
+                    NSLog("TumaLan: announced to \(host):\(port) (attempt \(n))")
+                    return
+                }
+                NSLog("TumaLan: announce to \(host):\(port) failed (attempt \(n))")
+                if Date() < deadline {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) { attempt(n + 1) }
+                }
+            }
+        }
+        attempt(1)
+    }
+
+    func sweepSubnet(deviceInfo: [String: Any], prefix: String, seconds: Int) {
+        let myFingerprint = deviceInfo["fingerprint"] as? String ?? ""
+        let port = (deviceInfo["port"] as? Int) ?? 53480
+        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+        let lock = NSLock()
+        var found = false
+
+        func round() {
+            let group = DispatchGroup()
+            for hostNumber in 2...254 {
+                let host = "\(prefix).\(hostNumber)"
+                let request = Data("GET /api/tumira/v1/info?fingerprint=\(myFingerprint) HTTP/1.1\r\nHost: \(host):\(port)\r\nConnection: close\r\n\r\n".utf8)
+                group.enter()
+                LanManager.rawHttp(host: host, port: port, request: request, timeout: 2) { response in
+                    defer { group.leave() }
+                    guard let body = response?.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n"),
+                          var info = (try? JSONSerialization.jsonObject(with: Data(body.utf8))) as? [String: Any],
+                          (info["app"] as? String) == "tumira",
+                          let fingerprint = info["fingerprint"] as? String, !fingerprint.isEmpty, fingerprint != myFingerprint else { return }
+                    lock.lock()
+                    let first = !found
+                    found = true
+                    lock.unlock()
+                    if first {
+                        info["ip"] = host
+                        self.emitPeerFound(info)
+                    }
+                }
+            }
+            group.notify(queue: .global()) {
+                lock.lock()
+                let done = found
+                lock.unlock()
+                if !done && Date() < deadline {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { round() }
+                }
+            }
+        }
+        round()
+    }
 
     // ── Local IP ─────────────────────────────────────────────────
 

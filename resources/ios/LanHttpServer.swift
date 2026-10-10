@@ -165,7 +165,12 @@ private final class HttpConnection {
             respondJson(200, manager.deviceInfoJson())
         case endpoint("register"):
             bufferBody(initialBody) { body in
-                if let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+                if var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                   (json["app"] as? String) == "tumira" {
+                    // The caller's address as we see it (a phone that joined a pairing code announces itself this way).
+                    if (json["ip"] as? String ?? "").isEmpty, case let .hostPort(host, _) = self.connection.endpoint {
+                        json["ip"] = "\(host)".components(separatedBy: "%").first ?? "\(host)"
+                    }
                     self.manager.emitPeerFound(json)
                 }
                 self.respondJson(200, self.manager.deviceInfoJson())
