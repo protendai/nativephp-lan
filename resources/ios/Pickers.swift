@@ -1,5 +1,6 @@
 import Foundation
 import PhotosUI
+import QuickLook
 import UIKit
 import UniformTypeIdentifiers
 
@@ -143,5 +144,45 @@ final class TumaPickers: NSObject, UIDocumentPickerDelegate, PHPickerViewControl
             NSLog("TumaLan: could not copy picked file \(source.lastPathComponent): \(error.localizedDescription)")
             return nil
         }
+    }
+}
+
+/// Quick Look preview for Lan.OpenFile. Long-lived because the controller's
+/// data source is a weak reference.
+final class TumaQuickLook: NSObject, QLPreviewControllerDataSource {
+
+    static let shared = TumaQuickLook()
+
+    private var url: URL?
+
+    func present(_ url: URL) -> Bool {
+        guard QLPreviewController.canPreview(url as NSURL) else { return false }
+        self.url = url
+
+        var presented = false
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  var top = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+                    ?? scene.windows.first?.rootViewController else {
+                semaphore.signal()
+                return
+            }
+            while let next = top.presentedViewController { top = next }
+            let preview = QLPreviewController()
+            preview.dataSource = self
+            top.present(preview, animated: true) {
+                presented = true
+                semaphore.signal()
+            }
+        }
+        _ = semaphore.wait(timeout: .now() + 2)
+        return presented
+    }
+
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int { url == nil ? 0 : 1 }
+
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+        (url ?? URL(fileURLWithPath: "/")) as NSURL
     }
 }

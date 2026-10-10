@@ -185,11 +185,18 @@ enum LanFunctions {
         }
     }
 
-    /// Android-only (content:// URIs). iOS received files are plain paths that
-    /// PHP opens with Share::file(), so this always reports "not handled".
+    /// Show a file (image, video, audio, PDF, document) in Quick Look, with
+    /// iOS's own share button. Params: uri (a plain file path on iOS).
     class OpenFile: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
-            return BridgeResponse.success(data: ["ok": false])
+            guard let uri = parameters["uri"] as? String, !uri.isEmpty else {
+                return BridgeResponse.success(data: ["ok": false])
+            }
+            let path = uri.hasPrefix("file://") ? (URL(string: uri)?.path ?? uri) : uri
+            guard FileManager.default.fileExists(atPath: path) else {
+                return BridgeResponse.success(data: ["ok": false])
+            }
+            return BridgeResponse.success(data: ["ok": TumaQuickLook.shared.present(URL(fileURLWithPath: path))])
         }
     }
 }
