@@ -40,6 +40,15 @@ class Lan
         $this->call('Lan.SweepSubnet', ['deviceInfo' => $deviceInfo, 'prefix' => $prefix, 'seconds' => $seconds]);
     }
 
+    /**
+     * Introduce ourselves to a Tumira server (POST register), retrying for up
+     * to $seconds. The server answers with PeerFound carrying our IP.
+     */
+    public function announce(array $deviceInfo, string $host, int $port = 53480, int $seconds = 20): void
+    {
+        $this->call('Lan.Announce', ['deviceInfo' => $deviceInfo, 'host' => $host, 'port' => $port, 'seconds' => $seconds]);
+    }
+
     public function stopDiscovery(): void
     {
         $this->call('Lan.StopDiscovery', []);

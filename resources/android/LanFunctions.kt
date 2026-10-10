@@ -60,6 +60,23 @@ object LanFunctions {
         }
     }
 
+    /**
+     * Tell a Tumira server who we are (POST register), retrying until it
+     * answers or `seconds` pass. Params: deviceInfo, host, port, seconds.
+     * Used after joining a sender's pairing code: the sender learns our IP.
+     */
+    class Announce(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            val deviceInfo = mapToJson(parameters["deviceInfo"])
+            val host = parameters["host"] as? String ?: return mapOf("ok" to false)
+            val port = (parameters["port"] as? Number)?.toInt() ?: 53480
+            val seconds = (parameters["seconds"] as? Number)?.toInt() ?: 20
+            LanManager.attach(activity)
+            LanManager.announce(deviceInfo, host, port, seconds)
+            return mapOf("ok" to true)
+        }
+    }
+
     class StopDiscovery(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             LanManager.stopDiscovery()
@@ -343,6 +360,36 @@ object LanManager {
     fun sweepSubnet(info: JSONObject, prefix: String, seconds: Int) {
         val context = appContext ?: return
         thread(name = "tuma-sweep") { DiscoveryManager(context, info, this).sweep(prefix, seconds) }
+    }
+
+    fun announce(info: JSONObject, host: String, port: Int, seconds: Int) {
+        thread(name = "tuma-announce-to") {
+            val deadline = System.currentTimeMillis() + seconds * 1000L
+            val body = info.toString().toByteArray()
+            var attempt = 0
+            while (System.currentTimeMillis() < deadline) {
+                attempt++
+                try {
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress(host, port), 1500)
+                        socket.soTimeout = 3000
+                        val head = "POST /api/tumira/v1/register HTTP/1.1\r\nHost: $host:$port\r\n" +
+                            "Content-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n"
+                        socket.getOutputStream().apply { write(head.toByteArray()); write(body); flush() }
+                        val status = socket.getInputStream().bufferedReader().readLine() ?: ""
+                        if (status.contains(" 200")) {
+                            Log.d(TAG, "announced to $host:$port (attempt $attempt)")
+                            return@thread
+                        }
+                        Log.w(TAG, "announce to $host:$port answered: $status")
+                    }
+                } catch (e: Exception) {
+                    if (attempt <= 3 || attempt % 5 == 0) Log.w(TAG, "announce to $host:$port failed (attempt $attempt): ${e.javaClass.simpleName}: ${e.message}")
+                }
+                runCatching { Thread.sleep(1000) }
+            }
+            Log.w(TAG, "announce to $host:$port gave up after ${seconds}s")
+        }
     }
 
     fun stopDiscovery() {

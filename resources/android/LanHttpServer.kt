@@ -35,6 +35,9 @@ class LanHttpServer(port: Int, private val manager: LanManager) : NanoHTTPD("0.0
     private fun handleRegister(session: IHTTPSession): Response {
         val body = readJsonBody(session)
         if (body != null && body.optString("app") == LanManager.APP_ID) {
+            // The caller's address as we see it (a phone that joined our pairing code announces itself this way).
+            if (body.optString("ip").isEmpty()) body.put("ip", session.remoteIpAddress)
+            android.util.Log.d(LanManager.TAG, "register from ${session.remoteIpAddress} (${body.optString("alias")})")
             manager.emitPeerFound(body)
         }
         return json(Response.Status.OK, manager.deviceInfoJson())

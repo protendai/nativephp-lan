@@ -3,6 +3,7 @@
     "bridge_functions": [
         { "name": "Lan.StartDiscovery", "ios": "LanFunctions.StartDiscovery", "android": "com.tuma.lan.LanFunctions.StartDiscovery" },
         { "name": "Lan.SweepSubnet", "ios": "LanFunctions.SweepSubnet", "android": "com.tuma.lan.LanFunctions.SweepSubnet" },
+        { "name": "Lan.Announce", "ios": "LanFunctions.Announce", "android": "com.tuma.lan.LanFunctions.Announce" },
         { "name": "Lan.StopDiscovery", "ios": "LanFunctions.StopDiscovery", "android": "com.tuma.lan.LanFunctions.StopDiscovery" },
         { "name": "Lan.StartServer", "ios": "LanFunctions.StartServer", "android": "com.tuma.lan.LanFunctions.StartServer" },
         { "name": "Lan.StopServer", "ios": "LanFunctions.StopServer", "android": "com.tuma.lan.LanFunctions.StopServer" },

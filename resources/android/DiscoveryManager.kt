@@ -153,12 +153,15 @@ class DiscoveryManager(
         val deadline = System.currentTimeMillis() + seconds * 1000L
         var found = false
         Log.d(LanManager.TAG, "sweep of $prefix.0/24 for ${seconds}s")
+        var round = 0
         while (!found && System.currentTimeMillis() < deadline) {
+            round++
+            val errors = java.util.concurrent.ConcurrentHashMap<String, Int>()
             val pool = Executors.newFixedThreadPool(48)
             for (host in 2..254) {
                 val target = "$prefix.$host"
                 pool.execute {
-                    probe(target, port)?.let { info ->
+                    probeOrError(target, port) { error -> errors.merge(error, 1, Int::plus) }?.let { info ->
                         if (info.optString("app") == LanManager.APP_ID && info.optString("fingerprint") != myFingerprint) {
                             found = true
                             emitPeer(info, target)
@@ -168,10 +171,27 @@ class DiscoveryManager(
             }
             pool.shutdown()
             runCatching { pool.awaitTermination(10, TimeUnit.SECONDS) }
+            if (!found && round <= 2) Log.d(LanManager.TAG, "sweep round $round errors: $errors")
             if (!found) runCatching { Thread.sleep(1500) }
         }
         running = false
         Log.d(LanManager.TAG, "sweep of $prefix.0/24 ${if (found) "found a peer" else "found nothing"}")
+    }
+
+    /** probe(), reporting why it failed (exception class + message) for diagnostics. */
+    private fun probeOrError(host: String, targetPort: Int, onError: (String) -> Unit): JSONObject? = try {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(host, targetPort), 600)
+            socket.soTimeout = 1500
+            val request = "GET /api/tumira/v1/info?fingerprint=$myFingerprint HTTP/1.1\r\n" +
+                "Host: $host:$targetPort\r\nConnection: close\r\n\r\n"
+            socket.getOutputStream().apply { write(request.toByteArray()); flush() }
+            val response = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
+            JSONObject(response.substringAfter("\r\n\r\n", "")).takeIf { it.has("fingerprint") }
+        }
+    } catch (e: Exception) {
+        onError("${e.javaClass.simpleName}: ${e.message?.substringAfterLast(": ")?.take(40)}")
+        null
     }
 
     private fun probe(host: String, targetPort: Int): JSONObject? = runCatching {
