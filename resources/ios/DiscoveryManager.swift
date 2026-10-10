@@ -32,8 +32,8 @@ final class DiscoveryManager {
             )
 
             let connectionGroup = NWConnectionGroup(with: multicast, using: .udp)
-            connectionGroup.setReceiveHandler(maximumMessageSize: 65536, rejectOversizedMessages: true) { [weak self] _, content, _ in
-                if let content = content { self?.handle(content) }
+            connectionGroup.setReceiveHandler(maximumMessageSize: 65536, rejectOversizedMessages: true) { [weak self] message, content, _ in
+                if let content = content { self?.handle(content, from: message.remoteEndpoint) }
             }
             connectionGroup.stateUpdateHandler = { [weak self] state in
                 if case .ready = state { self?.startAnnouncing() }
@@ -60,19 +60,31 @@ final class DiscoveryManager {
         group?.send(content: data) { _ in }
     }
 
-    private func handle(_ content: Data) {
+    /// "192.168.18.95" from the sender's endpoint (scope suffixes like %en0 stripped).
+    private static func ipv4(of endpoint: NWEndpoint?) -> String {
+        guard case let .hostPort(host, _)? = endpoint else { return "" }
+        switch host {
+        case let .ipv4(address):
+            return "\(address)".components(separatedBy: "%").first ?? ""
+        case let .name(name, _):
+            return name
+        default:
+            return ""
+        }
+    }
+
+    private func handle(_ content: Data, from endpoint: NWEndpoint?) {
         guard let info = (try? JSONSerialization.jsonObject(with: content)) as? [String: Any] else { return }
         guard (info["app"] as? String) == "tumira" else { return }
         let fingerprint = (info["fingerprint"] as? String) ?? ""
         if fingerprint.isEmpty || fingerprint == myFingerprint { return }
 
-        // NWConnectionGroup does not surface the sender's address here, so peers
-        // are announced without an IP; the app confirms reachability via /info
-        // when the user acts, and register-over-HTTP fills the IP in.
+        // The sender's address comes from the datagram's remote endpoint.
+        let senderIp = Self.ipv4(of: endpoint)
         let peer: [String: Any] = [
             "alias": info["alias"] as? String ?? "",
             "fingerprint": fingerprint,
-            "ip": info["ip"] as? String ?? "",
+            "ip": senderIp.isEmpty ? (info["ip"] as? String ?? "") : senderIp,
             "port": info["port"] as? Int ?? 53480,
             "protocol": info["protocol"] as? String ?? "http",
             "deviceModel": info["deviceModel"] as? String ?? "",
