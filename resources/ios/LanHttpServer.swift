@@ -28,7 +28,9 @@ final class LanHttpServer {
     func start() throws {
         listener.newConnectionHandler = { [weak self] connection in
             guard let self = self else { return }
-            connection.start(queue: self.queue)
+            // Own queue per connection: prepare-upload blocks while the user decides,
+            // and must not stall other requests (cancel, other senders).
+            connection.start(queue: DispatchQueue(label: "com.tuma.lan.http.conn"))
             HttpConnection(connection: connection, manager: self.manager).begin()
         }
 
@@ -92,21 +94,41 @@ private final class HttpConnection {
         self.manager = manager
     }
 
-    func begin() { receive() }
+    /// Nothing else holds a connection handler, so keep it alive here until
+    /// close(); without this it was freed at once and requests got no answer.
+    private static var live: [ObjectIdentifier: HttpConnection] = [:]
+    private static let liveLock = NSLock()
 
+    func begin() {
+        HttpConnection.liveLock.lock()
+        HttpConnection.live[ObjectIdentifier(self)] = self
+        HttpConnection.liveLock.unlock()
+        receive()
+    }
+
+    private func close() {
+        connection.cancel()
+        HttpConnection.liveLock.lock()
+        HttpConnection.live.removeValue(forKey: ObjectIdentifier(self))
+        HttpConnection.liveLock.unlock()
+    }
+
+    /// Reads until the headers are in; after that only the upload route keeps
+    /// reading here (other routes read their body via bufferBody, and two
+    /// concurrent receives would split the bytes between them).
     private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
-            guard let self = self else { return }
-
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
             if let data = data, !data.isEmpty {
                 self.onData(data)
             }
             if isComplete || error != nil {
                 self.finishUploadIfStreaming()
-                self.connection.cancel()
+                self.close()
                 return
             }
-            self.receive()
+            if !self.headersParsed || self.uploadHandle != nil {
+                self.receive()
+            }
         }
     }
 
@@ -297,8 +319,8 @@ private final class HttpConnection {
             "Connection: close\r\n\r\n"
         var response = Data(head.utf8)
         response.append(json)
-        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
+        connection.send(content: response, completion: .contentProcessed { _ in
+            self.close()
         })
     }
 
