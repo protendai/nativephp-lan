@@ -16,6 +16,14 @@ final class DiscoveryManager {
     private let queue = DispatchQueue(label: "com.tuma.lan.discovery")
 
     private var group: NWConnectionGroup?
+    private var lastRegistered: [String: Date] = [:]
+
+    /// At most one HTTP register per peer every 20 s (announcements arrive every 5 s).
+    private func shouldRegister(with fingerprint: String) -> Bool {
+        if let last = lastRegistered[fingerprint], Date().timeIntervalSince(last) < 20 { return false }
+        lastRegistered[fingerprint] = Date()
+        return true
+    }
     private var timer: DispatchSourceTimer?
 
     init(deviceInfo: [String: Any], manager: LanManager) {
@@ -97,6 +105,12 @@ final class DiscoveryManager {
             reply["announce"] = false
             if let data = try? JSONSerialization.data(withJSONObject: reply) {
                 group?.send(content: data) { _ in }
+            }
+            // Multicast from iOS often never reaches the other phone, so also
+            // answer over HTTP (POST register, as LocalSend does): the sender
+            // then learns our current address. Throttled per peer.
+            if !senderIp.isEmpty, shouldRegister(with: fingerprint) {
+                LanManager.shared.announce(deviceInfo: reply, host: senderIp, port: info["port"] as? Int ?? 53480, seconds: 3)
             }
         }
     }
