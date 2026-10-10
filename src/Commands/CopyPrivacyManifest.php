@@ -53,7 +53,7 @@ class CopyPrivacyManifest extends NativePluginHookCommand
 
         foreach (self::BOOLEANS as $key => $value) {
             $fixed = (string) preg_replace(
-                '#(<key>'.preg_quote($key, '#').'</key>\s*)<string>[^<]*</string>#',
+                '#(<key>'.preg_quote($key, '#').'</key>\s*)(?:<string>[^<]*</string>|<string\s*/>)#',
                 '$1'.($value ? '<true/>' : '<false/>'),
                 $fixed,
             );
