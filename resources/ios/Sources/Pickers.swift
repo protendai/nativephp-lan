@@ -11,11 +11,11 @@ import UniformTypeIdentifiers
 /// {files: [{path, name, size}]} once everything is copied into
 /// tmp/picked-documents/<uuid>/<name>. Cancelling sends FilesPicked with [].
 /// The delegate is a long-lived singleton because pickers hold it weakly.
-final class TumaPickers: NSObject, UIDocumentPickerDelegate, PHPickerViewControllerDelegate {
+final class LanPickers: NSObject, UIDocumentPickerDelegate, PHPickerViewControllerDelegate {
 
-    static let shared = TumaPickers()
+    static let shared = LanPickers()
 
-    private let copyQueue = DispatchQueue(label: "com.tuma.lan.pickers", qos: .userInitiated)
+    private let copyQueue = DispatchQueue(label: "com.protendai.lan.pickers", qos: .userInitiated)
 
     // MARK: Presenting
 
@@ -136,12 +136,12 @@ final class TumaPickers: NSObject, UIDocumentPickerDelegate, PHPickerViewControl
 
         do {
             try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-            let destination = directory.appendingPathComponent(LanManager.sanitize(name))
+            let destination = directory.appendingPathComponent(LanFileNames.sanitize(name))
             try fm.copyItem(at: source, to: destination)
             let size = (try? fm.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value ?? 0
             return ["path": destination.path, "name": destination.lastPathComponent, "size": size]
         } catch {
-            NSLog("TumaLan: could not copy picked file \(source.lastPathComponent): \(error.localizedDescription)")
+            NSLog("nativephp-lan: could not copy a picked file: \(error.localizedDescription)")
             return nil
         }
     }
@@ -149,9 +149,9 @@ final class TumaPickers: NSObject, UIDocumentPickerDelegate, PHPickerViewControl
 
 /// Quick Look preview for Lan.OpenFile. Long-lived because the controller's
 /// data source is a weak reference.
-final class TumaQuickLook: NSObject, QLPreviewControllerDataSource {
+final class LanQuickLook: NSObject, QLPreviewControllerDataSource {
 
-    static let shared = TumaQuickLook()
+    static let shared = LanQuickLook()
 
     private var url: URL?
 

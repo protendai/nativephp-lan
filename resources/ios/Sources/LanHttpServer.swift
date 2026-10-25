@@ -1,24 +1,30 @@
 import Foundation
 import Network
 
-/// The receiving half of the Tumira LAN protocol, served over a hand-rolled HTTP/1.1
-/// listener (NWListener). JSON routes buffer their small bodies; the upload
-/// route streams straight to disk. Only metadata and progress cross back to
-/// PHP as events.
-///
-/// NOTE: unverified from this environment — validate on a Mac before shipping.
+/// The receiving half of the LAN protocol, served over a hand-rolled HTTP/1.1
+/// listener (NWListener). Limits: 16 KB of headers (431), 1 MB JSON bodies
+/// (413), a 30 s idle timeout, `maxConnections` simultaneous connections, and
+/// upload bodies that must carry a Content-Length no larger than the size
+/// declared in prepare-upload. Chunked bodies are rejected (501). One request
+/// per connection ("Connection: close").
 final class LanHttpServer {
 
     private let listener: NWListener
     private let manager: LanManager
-    private let queue = DispatchQueue(label: "com.tuma.lan.http")
+    private let config: LanConfig
+    private let queue = DispatchQueue(label: "com.protendai.lan.http")
 
-    init(port: UInt16, manager: LanManager) throws {
+    private let connectionsLock = NSLock()
+    private var connections: [ObjectIdentifier: HttpConnection] = [:]
+    private var stopped = false
+
+    init(port: UInt16, config: LanConfig, manager: LanManager) throws {
         self.manager = manager
+        self.config = config
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
-            throw NSError(domain: "tuma.lan", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad port"])
+            throw NSError(domain: "nativephp.lan", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad port"])
         }
         listener = try NWListener(using: params, on: nwPort)
     }
@@ -27,22 +33,26 @@ final class LanHttpServer {
     /// "address in use" surfaces here and the caller can fall back to another port.
     func start() throws {
         listener.newConnectionHandler = { [weak self] connection in
-            guard let self = self else { return }
-            // Own queue per connection: prepare-upload blocks while the user decides,
-            // and must not stall other requests (cancel, other senders).
-            connection.start(queue: DispatchQueue(label: "com.tuma.lan.http.conn"))
-            HttpConnection(connection: connection, manager: self.manager).begin()
+            guard let self = self else { connection.cancel(); return }
+            self.accept(connection)
         }
 
         let settled = DispatchSemaphore(value: 0)
+        let stateLock = NSLock()
         var failure: Error?
-        listener.stateUpdateHandler = { state in
+        var ready = false
+        listener.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                settled.signal()
+                stateLock.lock(); let first = !ready; ready = true; stateLock.unlock()
+                if first { settled.signal() }
             case .failed(let error):
-                failure = error
-                settled.signal()
+                stateLock.lock(); let starting = !ready; failure = error; ready = true; stateLock.unlock()
+                if starting {
+                    settled.signal()
+                } else {
+                    self?.manager.dispatch("ServerError", ["message": "listener: \(error.localizedDescription)"])
+                }
             default:
                 break
             }
@@ -51,123 +61,212 @@ final class LanHttpServer {
 
         if settled.wait(timeout: .now() + 3) == .timedOut {
             listener.cancel()
-            throw NSError(domain: "tuma.lan", code: 2, userInfo: [NSLocalizedDescriptionKey: "listener did not start"])
+            throw NSError(domain: "nativephp.lan", code: 2, userInfo: [NSLocalizedDescriptionKey: "listener did not start"])
         }
-        if let failure = failure {
+        stateLock.lock(); let error = failure; stateLock.unlock()
+        if let error = error {
             listener.cancel()
-            throw failure
+            throw error
         }
-        listener.stateUpdateHandler = nil
     }
 
+    private func accept(_ connection: NWConnection) {
+        connectionsLock.lock()
+        if stopped || connections.count >= config.maxConnections {
+            connectionsLock.unlock()
+            connection.cancel()
+            return
+        }
+        let handler = HttpConnection(connection: connection, config: config, manager: manager) { [weak self] closed in
+            guard let self = self else { return }
+            self.connectionsLock.lock()
+            self.connections.removeValue(forKey: ObjectIdentifier(closed))
+            self.connectionsLock.unlock()
+        }
+        connections[ObjectIdentifier(handler)] = handler
+        connectionsLock.unlock()
+        handler.begin()
+    }
+
+    /// Stop listening and close every connection. Parked requests were already
+    /// answered 503 by the manager; those replies go out before the close.
     func stop() {
+        connectionsLock.lock()
+        stopped = true
+        let all = Array(connections.values)
+        connectionsLock.unlock()
+
+        listener.stateUpdateHandler = nil
+        listener.newConnectionHandler = nil
         listener.cancel()
+        all.forEach { $0.abort() }
     }
 }
 
-/// One request/response cycle. Accumulates bytes until the header block is
-/// complete, then routes. The upload route keeps draining the body to a file.
+/// One request/response cycle. All state lives on `queue`, the queue the
+/// NWConnection runs on, so callbacks never race each other.
 private final class HttpConnection {
 
-    private let connection: NWConnection
-    private let manager: LanManager
-    private let apiPrefix = "/api/tumira/v1/"
+    private enum Phase {
+        case headers
+        case body
+        case upload
+        case parked
+        case done
+    }
 
+    private final class Upload {
+        let session: LanManager.Session
+        let file: LanManager.SessionFile
+        let handle: FileHandle
+        let destination: String
+        let total: Int64
+        var received: Int64 = 0
+        var lastEmit: TimeInterval = 0
+
+        init(session: LanManager.Session, file: LanManager.SessionFile, handle: FileHandle, destination: String, total: Int64) {
+            self.session = session
+            self.file = file
+            self.handle = handle
+            self.destination = destination
+            self.total = total
+        }
+    }
+
+    private let connection: NWConnection
+    private let config: LanConfig
+    private let manager: LanManager
+    private let onClose: (HttpConnection) -> Void
+    private let queue = DispatchQueue(label: "com.protendai.lan.http.conn")
+
+    private var phase = Phase.headers
     private var buffer = Data()
-    private var headersParsed = false
     private var method = ""
     private var path = ""
     private var query: [String: String] = [:]
     private var headers: [String: String] = [:]
-    private var contentLength = 0
+    private var contentLength: Int64?
+    private var remoteIp = ""
 
-    // Upload streaming state
-    private var uploadHandle: FileHandle?
-    private var uploadSessionId = ""
-    private var uploadFileId = ""
-    private var uploadDestination = ""
-    private var uploadReceived = 0
-    private var lastEmit: TimeInterval = 0
+    private var bodyHandler: ((Data) -> Void)?
+    private var upload: Upload?
+    private var lastActivity = Date()
+    private var idleTimer: DispatchSourceTimer?
+    private var responding = false
+    private var closed = false
 
-    init(connection: NWConnection, manager: LanManager) {
+    init(connection: NWConnection, config: LanConfig, manager: LanManager, onClose: @escaping (HttpConnection) -> Void) {
         self.connection = connection
+        self.config = config
         self.manager = manager
+        self.onClose = onClose
     }
-
-    /// Nothing else holds a connection handler, so keep it alive here until
-    /// close(); without this it was freed at once and requests got no answer.
-    private static var live: [ObjectIdentifier: HttpConnection] = [:]
-    private static let liveLock = NSLock()
 
     func begin() {
-        HttpConnection.liveLock.lock()
-        HttpConnection.live[ObjectIdentifier(self)] = self
-        HttpConnection.liveLock.unlock()
-        receive()
+        remoteIp = HttpConnection.ip(of: connection.endpoint)
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed, .cancelled:
+                self?.peerClosed()
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+        queue.async {
+            self.startIdleTimer()
+            self.receive()
+        }
     }
 
-    private func close() {
-        connection.cancel()
-        HttpConnection.liveLock.lock()
-        HttpConnection.live.removeValue(forKey: ObjectIdentifier(self))
-        HttpConnection.liveLock.unlock()
+    /// Called by the server on stop(). A reply already on its way finishes first.
+    func abort() {
+        queue.async {
+            if self.closed || self.responding { return }
+            self.discardUpload(reason: nil)
+            self.close()
+        }
     }
 
-    /// Reads until the headers are in; after that only the upload route keeps
-    /// reading here (other routes read their body via bufferBody, and two
-    /// concurrent receives would split the bytes between them).
+    // MARK: Reading
+
     private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self = self, !self.closed else { return }
             if let data = data, !data.isEmpty {
+                self.lastActivity = Date()
                 self.onData(data)
             }
+            if self.closed { return }
             if isComplete || error != nil {
-                self.finishUploadIfStreaming()
-                self.close()
+                self.peerClosed()
                 return
             }
-            if !self.headersParsed || self.uploadHandle != nil {
+            switch self.phase {
+            case .headers, .body, .upload:
                 self.receive()
+            case .parked, .done:
+                break
             }
         }
     }
 
     private func onData(_ data: Data) {
-        if uploadHandle != nil {
+        switch phase {
+        case .upload:
             writeUploadChunk(data)
-            return
-        }
-
-        buffer.append(data)
-
-        if !headersParsed {
-            guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else { return }
+        case .headers:
+            buffer.append(data)
+            guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if buffer.count > LanConfig.maxHeaderBytes { respondJson(431, ["message": "Headers too large"]) }
+                return
+            }
+            if headerEnd.lowerBound - buffer.startIndex > LanConfig.maxHeaderBytes {
+                respondJson(431, ["message": "Headers too large"])
+                return
+            }
             let headerData = buffer.subdata(in: buffer.startIndex..<headerEnd.lowerBound)
-            parseHeaders(headerData)
-            headersParsed = true
-
-            let bodyStart = headerEnd.upperBound
-            let remainder = buffer.subdata(in: bodyStart..<buffer.endIndex)
-            buffer.removeAll(keepingCapacity: false)
+            let remainder = buffer.subdata(in: headerEnd.upperBound..<buffer.endIndex)
+            buffer = Data()
+            guard parseHeaders(headerData) else {
+                respondJson(400, ["message": "Bad request"])
+                return
+            }
             route(initialBody: remainder)
+        case .body:
+            buffer.append(data)
+            deliverBodyIfComplete()
+        case .parked, .done:
+            break
         }
     }
 
-    private func parseHeaders(_ data: Data) {
+    /// Peer finished sending or the connection failed.
+    private func peerClosed() {
+        if closed { return }
+        if phase == .parked { return } // the reply will fail to send and close; nothing else to do
+        if let upload = upload, upload.received < upload.total {
+            discardUpload(reason: "interrupted")
+        }
+        close()
+    }
+
+    // MARK: Parsing
+
+    private func parseHeaders(_ data: Data) -> Bool {
         let text = String(decoding: data, as: UTF8.self)
         let lines = text.components(separatedBy: "\r\n")
-        guard let requestLine = lines.first else { return }
+        guard let requestLine = lines.first else { return false }
 
-        let parts = requestLine.components(separatedBy: " ")
-        if parts.count >= 2 {
-            method = parts[0].uppercased()
-            let target = parts[1]
-            if let q = target.firstIndex(of: "?") {
-                path = String(target[..<q])
-                query = HttpConnection.parseQuery(String(target[target.index(after: q)...]))
-            } else {
-                path = target
-            }
+        let parts = requestLine.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 2 else { return false }
+        method = parts[0].uppercased()
+        let target = String(parts[1])
+        if let q = target.firstIndex(of: "?") {
+            path = String(target[..<q])
+            query = HttpConnection.parseQuery(String(target[target.index(after: q)...]))
+        } else {
+            path = target
         }
 
         for line in lines.dropFirst() {
@@ -176,163 +275,319 @@ private final class HttpConnection {
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
             headers[key] = value
         }
-        contentLength = Int(headers["content-length"] ?? "0") ?? 0
+
+        if let raw = headers["content-length"] {
+            guard let length = Int64(raw), length >= 0 else { return false }
+            contentLength = length
+        }
+        return true
     }
 
+    /// Chunked (or any other encoded) request bodies are not decoded.
+    private var hasUnsupportedEncoding: Bool {
+        guard let encoding = headers["transfer-encoding"]?.lowercased(), !encoding.isEmpty else { return false }
+        return encoding != "identity"
+    }
+
+    // MARK: Routing
+
     private func route(initialBody: Data) {
-        let normalized = path.hasSuffix("/") ? String(path.dropLast()) : path
+        let normalized = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
 
         switch normalized {
-        case endpoint("info"):
+        case config.endpoint("info"):
             respondJson(200, manager.deviceInfoJson())
-        case endpoint("register"):
-            bufferBody(initialBody) { body in
-                if var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-                   (json["app"] as? String) == "tumira" {
-                    // The caller's address as we see it (a phone that joined a pairing code announces itself this way).
-                    if (json["ip"] as? String ?? "").isEmpty, case let .hostPort(host, _) = self.connection.endpoint {
-                        json["ip"] = "\(host)".components(separatedBy: "%").first ?? "\(host)"
-                    }
-                    self.manager.emitPeerFound(json)
-                }
-                self.respondJson(200, self.manager.deviceInfoJson())
+        case config.endpoint("register"):
+            readJsonBody(initialBody) { json in self.handleRegister(json) }
+        case config.endpoint("prepare-upload"):
+            let locked = manager.pinLockedSeconds(ip: remoteIp)
+            if locked > 0 {
+                respondJson(429, ["message": "Too many wrong PINs; retry in \(locked)s"], extraHeaders: ["Retry-After": "\(locked)"])
+                return
             }
-        case endpoint("prepare-upload"):
-            bufferBody(initialBody) { body in self.handlePrepareUpload(body) }
-        case endpoint("upload"):
+            readJsonBody(initialBody) { json in self.handlePrepareUpload(json) }
+        case config.endpoint("upload"):
             startUpload(initialBody: initialBody)
-        case endpoint("cancel"):
-            if let sessionId = query["sessionId"] { self.manager.cancelSession(sessionId: sessionId, reason: "sender") }
+        case config.endpoint("cancel"):
+            if let sessionId = query["sessionId"] {
+                manager.cancelFromSender(sessionId: sessionId, remoteIp: remoteIp)
+            } else if let fingerprint = query["fingerprint"] {
+                manager.cancelPendingFrom(fingerprint: fingerprint, remoteIp: remoteIp)
+            }
             respondJson(200, [:])
         default:
             respondJson(404, ["message": "Not found"])
         }
     }
 
-    // ── prepare-upload ───────────────────────────────────────────
-
-    private func handlePrepareUpload(_ body: Data) {
-        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
-        let sender = json["info"] as? [String: Any] ?? [:]
-        let filesMap = json["files"] as? [String: Any] ?? [:]
-        let files = filesMap.values.compactMap { $0 as? [String: Any] }
-        let pin = query["pin"]
-
-        let request = manager.parkUploadRequest(sender: sender, files: files, pinProvided: pin)
-        // Blocking wait is fine: this runs on the listener queue per-connection.
-        let answered = request.await()
-        manager.completePending(request.requestId)
-
-        if !answered || request.status == 403 {
-            respondJson(403, ["message": "declined"]); return
+    /// Collect a JSON body of at most 1 MB, then hand it over (nil when absent or invalid).
+    private func readJsonBody(_ initial: Data, _ done: @escaping ([String: Any]?) -> Void) {
+        if hasUnsupportedEncoding {
+            respondJson(501, ["message": "Transfer-Encoding not supported"])
+            return
         }
-        if request.status == 401 { respondJson(401, ["message": "PIN required"]); return }
-        if request.status == 429 { respondJson(429, ["message": "Too many requests"]); return }
-
-        respondJson(200, ["sessionId": request.sessionId ?? "", "files": request.tokens])
+        let length = contentLength ?? 0
+        if length > Int64(LanConfig.maxJsonBytes) {
+            respondJson(413, ["message": "Body too large"])
+            return
+        }
+        bodyHandler = { data in
+            done((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
+        }
+        phase = .body
+        buffer = initial
+        deliverBodyIfComplete()
     }
 
-    // ── upload streaming ─────────────────────────────────────────
+    private func deliverBodyIfComplete() {
+        let length = Int(contentLength ?? 0)
+        guard buffer.count >= length, let handler = bodyHandler else { return }
+        let body = buffer.prefix(length)
+        buffer = Data()
+        bodyHandler = nil
+        phase = .done
+        handler(Data(body))
+    }
 
-    private func startUpload(initialBody: Data) {
-        let sessionId = query["sessionId"]
-        let fileId = query["fileId"]
-        let token = query["token"]
+    private func handleRegister(_ json: [String: Any]?) {
+        if var info = json, (info["app"] as? String) == config.serviceId,
+           let fingerprint = info["fingerprint"] as? String, !fingerprint.isEmpty {
+            // Only the address we see counts; a declared "ip" is ignored.
+            info["ip"] = remoteIp
+            manager.emitPeerFound(LanManager.peer(from: info, ip: remoteIp, config: config))
+        }
+        respondJson(200, manager.deviceInfoJson())
+    }
 
-        guard manager.validToken(sessionId: sessionId, fileId: fileId, token: token),
-              let sessionId = sessionId, let fileId = fileId,
-              let dir = manager.incomingDirectory(),
-              let name = manager.fileName(sessionId: sessionId, fileId: fileId) else {
-            respondJson(403, ["message": "invalid token"]); return
+    // MARK: prepare-upload
+
+    private func handlePrepareUpload(_ json: [String: Any]?) {
+        guard let json = json else { respondJson(400, ["message": "Invalid JSON"]); return }
+        let sender = json["info"] as? [String: Any] ?? [:]
+        let filesMap = json["files"] as? [String: Any] ?? [:]
+
+        if filesMap.isEmpty { respondJson(400, ["message": "No files"]); return }
+        if filesMap.count > config.maxFiles { respondJson(413, ["message": "Too many files"]); return }
+
+        var files: [LanManager.DeclaredFile] = []
+        for (key, value) in filesMap {
+            guard let file = value as? [String: Any] else { respondJson(400, ["message": "Invalid file entry"]); return }
+            guard let size = (file["size"] as? NSNumber)?.int64Value, size >= 0 else {
+                respondJson(400, ["message": "Missing file size"]); return
+            }
+            if config.maxFileSize > 0, size > config.maxFileSize { respondJson(413, ["message": "File too large"]); return }
+            let id = (file["id"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key
+            files.append(LanManager.DeclaredFile(id: id, fileName: file["fileName"] as? String ?? "", size: size, json: file))
         }
 
-        let sessionDir = (dir as NSString).appendingPathComponent(sessionId)
+        phase = .parked
+        let parked = manager.parkUploadRequest(sender: sender, files: files, pinProvided: query["pin"], remoteIp: remoteIp) { [weak self] status, body in
+            guard let self = self else { return }
+            self.queue.async {
+                if self.closed { return }
+                self.phase = .done
+                self.respondJson(status, body)
+            }
+        }
+        if !parked {
+            phase = .done
+            respondJson(429, ["message": "Too many pending requests"])
+        }
+    }
+
+    // MARK: upload streaming
+
+    private func startUpload(initialBody: Data) {
+        if hasUnsupportedEncoding { respondJson(501, ["message": "Transfer-Encoding not supported; send Content-Length"]); return }
+        guard let total = contentLength else { respondJson(411, ["message": "Content-Length required"]); return }
+
+        let session: LanManager.Session
+        let file: LanManager.SessionFile
+        switch manager.claim(sessionId: query["sessionId"], fileId: query["fileId"], token: query["token"]) {
+        case .invalid:
+            respondJson(403, ["message": "Invalid token"]); return
+        case .used:
+            respondJson(409, ["message": "Token already used"]); return
+        case let .ok(claimedSession, claimedFile):
+            session = claimedSession
+            file = claimedFile
+        }
+
+        if total > file.size { respondJson(413, ["message": "Larger than declared"]); return }
+        if config.maxFileSize > 0, total > config.maxFileSize { respondJson(413, ["message": "File too large"]); return }
+        guard let dir = manager.incomingDirectory() else { respondJson(500, ["message": "No destination"]); return }
+        if total > LanManager.freeSpace(dir) { respondJson(507, ["message": "Not enough storage"]); return }
+
+        let sessionDir = (dir as NSString).appendingPathComponent(session.id)
         try? FileManager.default.createDirectory(atPath: sessionDir, withIntermediateDirectories: true)
-        let destination = (sessionDir as NSString).appendingPathComponent(name)
-        FileManager.default.createFile(atPath: destination, contents: nil)
+        let destination = (sessionDir as NSString).appendingPathComponent(file.name)
+        guard (destination as NSString).deletingLastPathComponent == sessionDir,
+              FileManager.default.createFile(atPath: destination, contents: nil),
+              let handle = FileHandle(forWritingAtPath: destination) else {
+            respondJson(500, ["message": "Cannot open destination"]); return
+        }
 
-        uploadHandle = FileHandle(forWritingAtPath: destination)
-        uploadSessionId = sessionId
-        uploadFileId = fileId
-        uploadDestination = destination
-        uploadReceived = 0
+        upload = Upload(session: session, file: file, handle: handle, destination: destination, total: total)
+        phase = .upload
 
-        if !initialBody.isEmpty { writeUploadChunk(initialBody) }
-        // Body with no Content-Length or already fully delivered: finish now.
-        if contentLength > 0 && uploadReceived >= contentLength { finishUploadIfStreaming() }
+        if total == 0 {
+            finishUpload()
+        } else if !initialBody.isEmpty {
+            writeUploadChunk(initialBody)
+        }
     }
 
     private func writeUploadChunk(_ data: Data) {
-        uploadHandle?.write(data)
-        uploadReceived += data.count
+        guard let upload = upload else { return }
 
-        let now = Date().timeIntervalSince1970
-        if now - lastEmit >= 0.25 {
-            manager.emitProgress(sessionId: uploadSessionId, fileId: uploadFileId,
-                                 received: uploadReceived, total: contentLength > 0 ? contentLength : uploadReceived)
-            lastEmit = now
+        if upload.session.cancelled {
+            discardUpload(reason: nil)
+            respondJson(410, ["message": "Session cancelled"])
+            return
         }
 
-        if contentLength > 0 && uploadReceived >= contentLength { finishUploadIfStreaming() }
+        let remaining = upload.total - upload.received
+        let slice = Int64(data.count) > remaining ? data.prefix(Int(remaining)) : data
+        do {
+            try upload.handle.write(contentsOf: slice)
+        } catch {
+            let full = HttpConnection.isDiskFull(error)
+            discardUpload(reason: full ? "storage" : "error")
+            respondJson(full ? 507 : 500, ["message": full ? "Not enough storage" : "Write failed"])
+            return
+        }
+        upload.received += Int64(slice.count)
+
+        let now = Date().timeIntervalSince1970
+        // Each progress event costs PHP a DB write and a re-render; twice a second is plenty.
+        if now - upload.lastEmit >= 0.5 {
+            manager.emitProgress(sessionId: upload.session.id, fileId: upload.file.id, received: upload.received, total: upload.total)
+            upload.lastEmit = now
+        }
+
+        if upload.received >= upload.total { finishUpload() }
     }
 
-    private func finishUploadIfStreaming() {
-        guard uploadHandle != nil else { return }
-        uploadHandle?.closeFile()
-        uploadHandle = nil
+    private func finishUpload() {
+        guard let upload = upload else { return }
+        do {
+            try upload.handle.close()
+        } catch {
+            let full = HttpConnection.isDiskFull(error)
+            discardUpload(reason: full ? "storage" : "error")
+            respondJson(full ? 507 : 500, ["message": full ? "Not enough storage" : "Write failed"])
+            return
+        }
+        self.upload = nil
+        phase = .done
 
-        manager.emitProgress(sessionId: uploadSessionId, fileId: uploadFileId,
-                             received: uploadReceived, total: contentLength > 0 ? contentLength : uploadReceived)
-        manager.emitComplete(sessionId: uploadSessionId, fileId: uploadFileId, path: uploadDestination)
+        if upload.session.cancelled {
+            try? FileManager.default.removeItem(atPath: upload.destination)
+            respondJson(410, ["message": "Session cancelled"])
+            return
+        }
+
+        manager.emitProgress(sessionId: upload.session.id, fileId: upload.file.id, received: upload.received, total: upload.total)
+        manager.emitComplete(sessionId: upload.session.id, fileId: upload.file.id, path: upload.destination)
         respondJson(200, [:])
     }
 
-    // ── helpers ──────────────────────────────────────────────────
+    /// Drop a partial upload. With a reason, the session is cancelled too (PHP hears SessionCancelled once).
+    private func discardUpload(reason: String?) {
+        guard let upload = upload else { return }
+        self.upload = nil
+        phase = .done
+        try? upload.handle.close()
+        try? FileManager.default.removeItem(atPath: upload.destination)
+        if let reason = reason {
+            manager.cancelSession(sessionId: upload.session.id, reason: reason)
+        }
+    }
 
-    private func bufferBody(_ initial: Data, _ done: @escaping (Data) -> Void) {
-        var body = initial
-        if body.count >= contentLength { done(body); return }
+    // MARK: Idle timeout
 
-        func pump() {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
-                if let data = data { body.append(data) }
-                if body.count >= self.contentLength || isComplete || error != nil {
-                    done(body)
-                } else {
-                    pump()
-                }
+    private func startIdleTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler { [weak self] in
+            guard let self = self, !self.closed, !self.responding, self.phase != .parked else { return }
+            if Date().timeIntervalSince(self.lastActivity) > LanConfig.idleTimeout {
+                self.discardUpload(reason: "interrupted")
+                self.close()
             }
         }
-        pump()
+        timer.resume()
+        idleTimer = timer
     }
 
-    private func endpoint(_ name: String) -> String {
-        let full = apiPrefix + name
-        return full.hasSuffix("/") ? String(full.dropLast()) : full
-    }
+    // MARK: Writing
 
-    private func respondJson(_ code: Int, _ body: [String: Any]) {
+    private func respondJson(_ code: Int, _ body: [String: Any], extraHeaders: [String: String] = [:]) {
+        if closed || responding { return }
+        responding = true
+        phase = .done
         let json = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
-        let head = "HTTP/1.1 \(code) \(HttpConnection.reason(code))\r\n" +
+        var head = "HTTP/1.1 \(code) \(HttpConnection.reason(code))\r\n" +
             "Content-Type: application/json\r\n" +
-            "Content-Length: \(json.count)\r\n" +
-            "Connection: close\r\n\r\n"
+            "Content-Length: \(json.count)\r\n"
+        for (name, value) in extraHeaders { head += "\(name): \(value)\r\n" }
+        head += "Connection: close\r\n\r\n"
         var response = Data(head.utf8)
         response.append(json)
-        connection.send(content: response, completion: .contentProcessed { _ in
-            self.close()
+        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
+            guard let self = self else { return }
+            self.queue.async { self.close() }
         })
     }
 
-    private static func parseQuery(_ string: String) -> [String: String] {
+    private func close() {
+        if closed { return }
+        closed = true
+        idleTimer?.cancel()
+        idleTimer = nil
+        connection.stateUpdateHandler = nil
+        connection.cancel()
+        onClose(self)
+    }
+
+    // MARK: Helpers
+
+    private static func ip(of endpoint: NWEndpoint) -> String {
+        guard case let .hostPort(host, _) = endpoint else { return "" }
+        switch host {
+        case let .ipv4(address):
+            return LanManager.normalizeIp("\(address)")
+        case let .ipv6(address):
+            return LanManager.normalizeIp("\(address)")
+        case let .name(name, _):
+            return LanManager.normalizeIp(name)
+        @unknown default:
+            return LanManager.normalizeIp("\(host)")
+        }
+    }
+
+    private static func isDiskFull(_ error: Error) -> Bool {
+        var current: NSError? = error as NSError
+        while let ns = current {
+            if ns.domain == NSCocoaErrorDomain && ns.code == NSFileWriteOutOfSpaceError { return true }
+            if ns.domain == NSPOSIXErrorDomain && ns.code == Int(ENOSPC) { return true }
+            current = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
+
+    /// "a=1&b=x%3Dy&c=hello+world" -> [a: 1, b: x=y, c: hello world]. Splits on the first "=" only.
+    static func parseQuery(_ string: String) -> [String: String] {
         var result: [String: String] = [:]
-        for pair in string.components(separatedBy: "&") {
-            let kv = pair.components(separatedBy: "=")
-            if kv.count == 2 {
-                let key = kv[0].removingPercentEncoding ?? kv[0]
-                let value = kv[1].removingPercentEncoding ?? kv[1]
-                result[key] = value
+        for pair in string.split(separator: "&", omittingEmptySubsequences: true) {
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let decode: (Substring) -> String = { raw in
+                let spaced = raw.replacingOccurrences(of: "+", with: " ")
+                return spaced.removingPercentEncoding ?? spaced
             }
+            let key = decode(parts[0])
+            if key.isEmpty { continue }
+            result[key] = parts.count > 1 ? decode(parts[1]) : ""
         }
         return result
     }
@@ -340,10 +595,20 @@ private final class HttpConnection {
     private static func reason(_ code: Int) -> String {
         switch code {
         case 200: return "OK"
+        case 400: return "Bad Request"
         case 401: return "Unauthorized"
         case 403: return "Forbidden"
         case 404: return "Not Found"
+        case 409: return "Conflict"
+        case 410: return "Gone"
+        case 411: return "Length Required"
+        case 413: return "Payload Too Large"
         case 429: return "Too Many Requests"
+        case 431: return "Request Header Fields Too Large"
+        case 500: return "Internal Server Error"
+        case 501: return "Not Implemented"
+        case 503: return "Service Unavailable"
+        case 507: return "Insufficient Storage"
         default: return "Error"
         }
     }
