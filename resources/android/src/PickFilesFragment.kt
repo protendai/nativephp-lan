@@ -1,4 +1,4 @@
-package com.tuma.lan
+package com.protendai.lan
 
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -62,7 +62,7 @@ class PickFilesFragment : Fragment() {
 
         LanManager.dispatch("FilesPicking", JSONObject().put("count", uris.size))
 
-        thread(name = "tuma-pick-copy") {
+        thread(name = "lan-pick-copy") {
             pruneOldCopies(context)
             val files = JSONArray()
             for (uri in uris) {
@@ -77,7 +77,7 @@ class PickFilesFragment : Fragment() {
     }
 
     companion object {
-        private const val TAG = "tuma-pick-files"
+        private const val TAG = "nativephp-lan-pick-files"
 
         fun launch(activity: FragmentActivity, mimeTypes: Array<String>) = add(activity) { this.mimeTypes = mimeTypes }
 
@@ -120,7 +120,7 @@ class PickFilesFragment : Fragment() {
 
             // DISPLAY_NAME comes from another app's provider: strip anything path-like
             // so the copy cannot land outside its directory.
-            val safeName = name?.replace(Regex("[/\\\\]"), "_")?.trim()?.takeIf { it.isNotEmpty() && it != "." && it != ".." } ?: "file"
+            val safeName = FileNames.sanitize(name)
 
             val directory = File(context.cacheDir, "picked-documents/" + UUID.randomUUID()).apply { mkdirs() }
             val destination = File(directory, safeName)
@@ -133,6 +133,6 @@ class PickFilesFragment : Fragment() {
                 .put("path", destination.absolutePath)
                 .put("name", safeName)
                 .put("size", if (size >= 0) size else destination.length())
-        }.onFailure { Log.w(LanManager.TAG, "could not copy picked file $uri", it) }.getOrNull()
+        }.onFailure { Log.w(LanManager.TAG, "could not copy a picked file", it) }.getOrNull()
     }
 }

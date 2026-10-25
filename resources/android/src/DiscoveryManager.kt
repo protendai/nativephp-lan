@@ -1,78 +1,100 @@
-package com.tuma.lan
+package com.protendai.lan
 
 import android.content.Context
 import android.net.wifi.WifiManager
-import android.util.Log
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.net.DatagramPacket
-import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.MulticastSocket
 import java.net.NetworkInterface
 import java.net.Socket
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
- * UDP multicast discovery: announce our device info to
- * 224.0.0.167:53480 every 5s and listen for other devices' announcements,
- * emitting PeerFound for each. Needs a held MulticastLock or most Wi-Fi
- * chipsets drop multicast frames.
+ * UDP multicast discovery: announce our device info to the configured group
+ * every 5 s and listen for other devices' announcements, emitting PeerFound
+ * for each. Holds a MulticastLock or most Wi-Fi chipsets drop multicast.
  *
  * The socket is pinned to the Wi-Fi interface: left to the default route,
  * Android joins/sends on mobile data and peers never hear us. Because many
- * routers drop multicast anyway, start() also sweeps the /24 over HTTP
- * (GET /api/tumira/v1/info). Only devices announcing app=tumira count, so
- * LocalSend and other apps on the same group never show up.
+ * routers drop multicast anyway, start() also probes the /24 over HTTP
+ * (GET {apiPrefix}/info). Only devices announcing "app": serviceId count.
+ *
+ * stop() is safe at any moment, including before the listener thread has
+ * opened its socket; sweeps stop too.
  */
 class DiscoveryManager(
     private val context: Context,
     private val deviceInfo: JSONObject,
+    private val config: LanConfig,
     private val manager: LanManager,
 ) {
-    private val group: InetAddress = InetAddress.getByName(LanManager.MULTICAST_GROUP)
-    private val port = LanManager.MULTICAST_PORT
+    private val port = config.multicastPort
     private val myFingerprint = deviceInfo.optString("fingerprint")
+    private val lock = Any()
 
+    private var group: InetAddress? = null
     private var socket: MulticastSocket? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var pools = mutableListOf<ExecutorService>()
 
     @Volatile
     private var running = false
 
-    fun start() {
-        if (running) return
-        running = true
+    /** Set by stop(); a stopped manager never runs again. */
+    @Volatile
+    private var stopped = false
 
-        val wifi = context.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        multicastLock = wifi?.createMulticastLock("tuma-lan")?.apply {
-            setReferenceCounted(true)
-            acquire()
+    fun start() {
+        synchronized(lock) {
+            if (running || stopped) return
+            running = true
+
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = runCatching {
+                wifi?.createMulticastLock("nativephp-lan")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }.getOrNull()
         }
 
-        thread(name = "tuma-discovery") {
+        thread(name = "lan-discovery") {
             try {
+                val groupAddress = InetAddress.getByName(config.multicastGroup)
                 val wifiInterface = wifiInterface()
                 // Built outside apply {}: inside it, `port` is MulticastSocket.getPort() (-1 while unconnected).
                 val bindAddress = InetSocketAddress(port)
-                val groupAddress = InetSocketAddress(group, port)
+                val groupSocketAddress = InetSocketAddress(groupAddress, port)
                 val listenSocket = MulticastSocket(null).apply {
                     reuseAddress = true
                     bind(bindAddress)
                     if (wifiInterface != null) {
                         networkInterface = wifiInterface
-                        joinGroup(groupAddress, wifiInterface)
+                        joinGroup(groupSocketAddress, wifiInterface)
                     } else {
-                        joinGroup(group)
+                        @Suppress("DEPRECATION")
+                        joinGroup(groupAddress)
                     }
                 }
-                socket = listenSocket
 
-                Log.d(LanManager.TAG, "discovery started on ${LanManager.MULTICAST_GROUP}:$port via ${wifiInterface?.name ?: "default"}")
-                thread(name = "tuma-announce") { announceLoop(listenSocket) }
-                thread(name = "tuma-scan") { scanSubnet() }
+                synchronized(lock) {
+                    if (!running) {
+                        runCatching { listenSocket.close() }
+                        return@thread
+                    }
+                    group = groupAddress
+                    socket = listenSocket
+                }
+
+                thread(name = "lan-announce") { announceLoop(listenSocket, groupAddress) }
+                thread(name = "lan-scan") { scanSubnet() }
 
                 val buffer = ByteArray(8192)
                 while (running) {
@@ -82,22 +104,18 @@ class DiscoveryManager(
                     } catch (e: Exception) {
                         if (!running) break else continue
                     }
-                    handlePacket(packet)
+                    handlePacket(packet, listenSocket)
                 }
             } catch (e: Exception) {
-                manager.dispatch("ServerError", JSONObject().put("message", e.message ?: "discovery error"))
+                if (running) manager.dispatch("ServerError", JSONObject().put("message", "discovery: ${e.message ?: "error"}"))
             }
         }
     }
 
-    private fun announceLoop(socket: MulticastSocket) {
+    private fun announceLoop(socket: MulticastSocket, groupAddress: InetAddress) {
+        val data = JSONObject(deviceInfo.toString()).put("announce", true).toString().toByteArray()
         while (running) {
-            try {
-                val announce = JSONObject(deviceInfo.toString()).put("announce", true)
-                val data = announce.toString().toByteArray()
-                socket.send(DatagramPacket(data, data.size, group, port))
-            } catch (_: Exception) {
-            }
+            runCatching { socket.send(DatagramPacket(data, data.size, groupAddress, port)) }
             try {
                 Thread.sleep(5000)
             } catch (_: InterruptedException) {
@@ -115,110 +133,118 @@ class DiscoveryManager(
             ?: candidates.firstOrNull { it.name.startsWith("wlan") }
     }.getOrNull()
 
+    private fun newPool(): ExecutorService? = synchronized(lock) {
+        if (!running) return null
+        Executors.newFixedThreadPool(48).also { pools.add(it) }
+    }
+
+    private fun releasePool(pool: ExecutorService) = synchronized(lock) { pools.remove(pool) }
+
     /**
-     * Probe every host on our /24 for a Tumira info endpoint. Raw sockets
-     * rather than HttpURLConnection so Android's cleartext policy can't block it.
+     * Probe every host on our /24 for an info endpoint. Raw sockets rather
+     * than HttpURLConnection so Android's cleartext policy can't block it.
      */
     private fun scanSubnet() {
         val ip = manager.localIp() ?: return
         val parts = ip.split(".")
         if (parts.size != 4) return
         val prefix = parts.take(3).joinToString(".")
-        val ports = listOf(port, port + 1).distinct()
+        val ports = listOf(config.port, config.port + 1).distinct()
 
-        Log.d(LanManager.TAG, "http scan of $prefix.0/24 started")
-        val pool = Executors.newFixedThreadPool(48)
-        for (host in 1..254) {
-            val target = "$prefix.$host"
-            if (target == ip) continue
-            for (targetPort in ports) {
-                pool.execute {
-                    if (running) probe(target, targetPort)?.let { emitPeer(it, target) }
-                }
-            }
-        }
-        pool.shutdown()
-        runCatching { pool.awaitTermination(30, TimeUnit.SECONDS) }
-        Log.d(LanManager.TAG, "http scan of $prefix.0/24 finished")
-    }
-
-    /**
-     * Sweep one /24 (e.g. the Wi-Fi Direct group 192.168.49) in rounds until a
-     * Tumira device answers or the time runs out. Used by a sender hosting a
-     * pairing code: it learns the joining phone's IP this way. Blocking; call
-     * off the main thread.
-     */
-    fun sweep(prefix: String, seconds: Int) {
-        running = true
-        val deadline = System.currentTimeMillis() + seconds * 1000L
-        var found = false
-        Log.d(LanManager.TAG, "sweep of $prefix.0/24 for ${seconds}s")
-        var round = 0
-        while (!found && System.currentTimeMillis() < deadline) {
-            round++
-            val errors = java.util.concurrent.ConcurrentHashMap<String, Int>()
-            val pool = Executors.newFixedThreadPool(48)
-            for (host in 2..254) {
+        val pool = newPool() ?: return
+        try {
+            for (host in 1..254) {
                 val target = "$prefix.$host"
-                pool.execute {
-                    probeOrError(target, port) { error -> errors.merge(error, 1, Int::plus) }?.let { info ->
-                        if (info.optString("app") == LanManager.APP_ID && info.optString("fingerprint") != myFingerprint) {
-                            found = true
-                            emitPeer(info, target)
-                        }
+                if (target == ip) continue
+                for (targetPort in ports) {
+                    pool.execute {
+                        if (running) probe(target, targetPort, 400)?.let { emitPeer(it, target) }
                     }
                 }
             }
             pool.shutdown()
-            runCatching { pool.awaitTermination(10, TimeUnit.SECONDS) }
-            if (!found && round <= 2) Log.d(LanManager.TAG, "sweep round $round errors: $errors")
-            if (!found) runCatching { Thread.sleep(1500) }
+            runCatching { pool.awaitTermination(30, TimeUnit.SECONDS) }
+        } catch (_: Exception) {
+            pool.shutdownNow()
+        } finally {
+            releasePool(pool)
         }
-        running = false
-        Log.d(LanManager.TAG, "sweep of $prefix.0/24 ${if (found) "found a peer" else "found nothing"}")
     }
 
-    /** probe(), reporting why it failed (exception class + message) for diagnostics. */
-    private fun probeOrError(host: String, targetPort: Int, onError: (String) -> Unit): JSONObject? = try {
+    /**
+     * Sweep one /24 (e.g. a Wi-Fi Direct group, "192.168.49") in rounds until
+     * a device answers, [seconds] pass or stop() is called. Blocking; call
+     * off the main thread.
+     */
+    fun sweep(prefix: String, seconds: Int) {
+        synchronized(lock) {
+            if (stopped) return
+            running = true
+        }
+        val deadline = System.currentTimeMillis() + seconds * 1000L
+        val found = AtomicBoolean(false)
+
+        while (running && !found.get() && System.currentTimeMillis() < deadline) {
+            val pool = newPool() ?: break
+            try {
+                for (host in 2..254) {
+                    val target = "$prefix.$host"
+                    pool.execute {
+                        if (!running || found.get()) return@execute
+                        probe(target, config.port, 600)?.let { info ->
+                            if (info.optString("app") == config.serviceId &&
+                                info.optString("fingerprint") != myFingerprint &&
+                                found.compareAndSet(false, true)
+                            ) {
+                                emitPeer(info, target)
+                            }
+                        }
+                    }
+                }
+                pool.shutdown()
+                runCatching { pool.awaitTermination(10, TimeUnit.SECONDS) }
+            } catch (_: Exception) {
+                pool.shutdownNow()
+            } finally {
+                releasePool(pool)
+            }
+            if (!found.get() && running) runCatching { Thread.sleep(1500) }
+        }
+        synchronized(lock) { running = false }
+    }
+
+    /** GET {prefix}/info, reading at most 64 KB of response. */
+    private fun probe(host: String, targetPort: Int, connectTimeout: Int): JSONObject? = runCatching {
         Socket().use { socket ->
-            socket.connect(InetSocketAddress(host, targetPort), 600)
+            socket.connect(InetSocketAddress(host, targetPort), connectTimeout)
             socket.soTimeout = 1500
-            val request = "GET /api/tumira/v1/info?fingerprint=$myFingerprint HTTP/1.1\r\n" +
+            val request = "GET ${config.endpoint("info")}?fingerprint=$myFingerprint HTTP/1.1\r\n" +
                 "Host: $host:$targetPort\r\nConnection: close\r\n\r\n"
             socket.getOutputStream().apply { write(request.toByteArray()); flush() }
-            val response = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
+
+            val out = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            val input = socket.getInputStream()
+            while (out.size() < LanConfig.MAX_PROBE_BYTES) {
+                val read = input.read(buffer, 0, minOf(buffer.size, LanConfig.MAX_PROBE_BYTES - out.size()))
+                if (read < 0) break
+                out.write(buffer, 0, read)
+            }
+            val response = out.toString("UTF-8")
             JSONObject(response.substringAfter("\r\n\r\n", "")).takeIf { it.has("fingerprint") }
-        }
-    } catch (e: Exception) {
-        onError("${e.javaClass.simpleName}: ${e.message?.substringAfterLast(": ")?.take(40)}")
-        null
-    }
-
-    private fun probe(host: String, targetPort: Int): JSONObject? = runCatching {
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(host, targetPort), 400)
-            socket.soTimeout = 1500
-            val request = "GET /api/tumira/v1/info?fingerprint=$myFingerprint HTTP/1.1\r\n" +
-                "Host: $host:$targetPort\r\nConnection: close\r\n\r\n"
-            socket.getOutputStream().apply { write(request.toByteArray()); flush() }
-            val response = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
-            val body = response.substringAfter("\r\n\r\n", "")
-            JSONObject(body).takeIf { it.has("fingerprint") }
         }
     }.getOrNull()
 
     private fun emitPeer(info: JSONObject, ip: String) {
-        if (info.optString("app") != LanManager.APP_ID) return
+        if (info.optString("app") != config.serviceId) return
         val fingerprint = info.optString("fingerprint")
         if (fingerprint.isEmpty() || fingerprint == myFingerprint) return
-
-        Log.d(LanManager.TAG, "peer at $ip (${info.optString("alias")})")
 
         val peer = JSONObject()
             .put("alias", info.optString("alias"))
             .put("fingerprint", fingerprint)
             .put("ip", ip)
-            .put("port", info.optInt("port", 53480))
+            .put("port", info.optInt("port", config.port))
             .put("protocol", info.optString("protocol", "http"))
             .put("deviceModel", info.optString("deviceModel"))
             .put("deviceType", info.optString("deviceType"))
@@ -226,32 +252,42 @@ class DiscoveryManager(
         manager.emitPeerFound(peer)
     }
 
-    private fun handlePacket(packet: DatagramPacket) {
-        val text = String(packet.data, 0, packet.length)
+    private fun handlePacket(packet: DatagramPacket, socket: MulticastSocket) {
+        val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
         val info = runCatching { JSONObject(text) }.getOrNull() ?: return
 
         val fingerprint = info.optString("fingerprint")
         if (fingerprint.isEmpty() || fingerprint == myFingerprint) return
+        if (info.optString("app") != config.serviceId) return
 
-        val ip = packet.address.hostAddress ?: return
+        // The address is the datagram's source, never a declared one.
+        val ip = packet.address?.hostAddress ?: return
         emitPeer(info, ip)
 
         // Reply directly so the other device learns about us too.
         if (info.optBoolean("announce", false)) {
             runCatching {
-                val reply = JSONObject(deviceInfo.toString()).put("announce", false)
-                val data = reply.toString().toByteArray()
-                socket?.send(DatagramPacket(data, data.size, packet.address, packet.port))
+                val data = JSONObject(deviceInfo.toString()).put("announce", false).toString().toByteArray()
+                socket.send(DatagramPacket(data, data.size, packet.address, packet.port))
             }
         }
     }
 
     fun stop() {
-        running = false
-        runCatching { socket?.leaveGroup(group) }
-        runCatching { socket?.close() }
-        socket = null
-        multicastLock?.let { runCatching { it.release() } }
-        multicastLock = null
+        val (closing, closingGroup, pending) = synchronized(lock) {
+            stopped = true
+            running = false
+            val snapshot = Triple(socket, group, pools.toList())
+            socket = null
+            group = null
+            pools.clear()
+            multicastLock?.let { runCatching { if (it.isHeld) it.release() } }
+            multicastLock = null
+            snapshot
+        }
+        pending.forEach { it.shutdownNow() }
+        @Suppress("DEPRECATION")
+        runCatching { if (closing != null && closingGroup != null) closing.leaveGroup(closingGroup) }
+        runCatching { closing?.close() }
     }
 }
