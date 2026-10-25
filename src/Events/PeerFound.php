@@ -1,10 +1,16 @@
 <?php
 
-namespace Tuma\Lan\Events;
+namespace Protendai\Lan\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
+/**
+ * Another device of this service was seen: by multicast announcement, HTTP
+ * subnet probe, sweep or its register call. $ip is always the address the
+ * device was seen at, never a self-declared one. The same device is reported
+ * repeatedly (every announcement); de-duplicate by $fingerprint.
+ */
 class PeerFound
 {
     use Dispatchable, SerializesModels;

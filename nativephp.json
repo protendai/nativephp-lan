@@ -1,99 +1,132 @@
 {
+    "name": "protendai/nativephp-lan",
+    "version": "1.0.0",
+    "description": "Local-network file transfer for NativePHP Mobile: UDP multicast + HTTP discovery and an embedded receive server that streams uploads to disk, with PHP deciding who may send.",
     "namespace": "Lan",
+    "keywords": [
+        "lan",
+        "wifi",
+        "file transfer",
+        "discovery",
+        "multicast",
+        "localsend",
+        "receive server"
+    ],
+    "category": "connectivity",
+    "license": "MIT",
+    "pricing": {
+        "type": "free"
+    },
+    "author": {
+        "name": "Tendai Karuma",
+        "email": "karumatendai@gmail.com",
+        "url": "https://github.com/protendai"
+    },
+    "homepage": "https://github.com/protendai/nativephp-lan",
+    "repository": "https://github.com/protendai/nativephp-lan",
+    "funding": [],
+    "platforms": [
+        "android",
+        "ios"
+    ],
     "bridge_functions": [
         {
             "name": "Lan.StartDiscovery",
+            "android": "com.protendai.lan.LanFunctions.StartDiscovery",
             "ios": "LanFunctions.StartDiscovery",
-            "android": "com.tuma.lan.LanFunctions.StartDiscovery"
+            "description": "Announce this device by UDP multicast, listen for others and probe the local /24 over HTTP. Devices arrive as PeerFound."
         },
         {
             "name": "Lan.SweepSubnet",
+            "android": "com.protendai.lan.LanFunctions.SweepSubnet",
             "ios": "LanFunctions.SweepSubnet",
-            "android": "com.tuma.lan.LanFunctions.SweepSubnet"
+            "description": "Probe one /24 (e.g. a Wi-Fi Direct group) in rounds until a device of this service answers. Emits PeerFound."
         },
         {
             "name": "Lan.Announce",
+            "android": "com.protendai.lan.LanFunctions.Announce",
             "ios": "LanFunctions.Announce",
-            "android": "com.tuma.lan.LanFunctions.Announce"
+            "description": "POST this device's info to a receive server (register) until it answers, so it learns our address."
         },
         {
             "name": "Lan.StopDiscovery",
+            "android": "com.protendai.lan.LanFunctions.StopDiscovery",
             "ios": "LanFunctions.StopDiscovery",
-            "android": "com.tuma.lan.LanFunctions.StopDiscovery"
+            "description": "Stop multicast discovery, subnet probes, sweeps and announces."
         },
         {
             "name": "Lan.StartServer",
+            "android": "com.protendai.lan.LanFunctions.StartServer",
             "ios": "LanFunctions.StartServer",
-            "android": "com.tuma.lan.LanFunctions.StartServer"
+            "description": "Start the HTTP receive server (configured port, or port + 1 when busy). Returns the bound port."
         },
         {
             "name": "Lan.StopServer",
+            "android": "com.protendai.lan.LanFunctions.StopServer",
             "ios": "LanFunctions.StopServer",
-            "android": "com.tuma.lan.LanFunctions.StopServer"
+            "description": "Stop the receive server: parked requests get 503, live connections close, partial files are removed."
         },
         {
             "name": "Lan.Respond",
+            "android": "com.protendai.lan.LanFunctions.Respond",
             "ios": "LanFunctions.Respond",
-            "android": "com.tuma.lan.LanFunctions.Respond"
+            "description": "Answer a parked send request (UploadRequested) with any HTTP status; 200 accepts files into a session."
         },
         {
             "name": "Lan.CancelSession",
+            "android": "com.protendai.lan.LanFunctions.CancelSession",
             "ios": "LanFunctions.CancelSession",
-            "android": "com.tuma.lan.LanFunctions.CancelSession"
+            "description": "Cancel a session from the receiving side; uploads stop and partial files are removed."
         },
         {
             "name": "Lan.LocalIp",
+            "android": "com.protendai.lan.LanFunctions.LocalIp",
             "ios": "LanFunctions.LocalIp",
-            "android": "com.tuma.lan.LanFunctions.LocalIp"
+            "description": "The device's current LAN IPv4 address."
         },
         {
             "name": "Lan.WifiEnabled",
+            "android": "com.protendai.lan.LanFunctions.WifiEnabled",
             "ios": "LanFunctions.WifiEnabled",
-            "android": "com.tuma.lan.LanFunctions.WifiEnabled"
-        },
-        {
-            "name": "Lan.OpenFile",
-            "ios": "LanFunctions.OpenFile",
-            "android": "com.tuma.lan.LanFunctions.OpenFile"
-        },
-        {
-            "name": "Lan.SetAppearance",
-            "ios": "LanFunctions.SetAppearance",
-            "android": "com.tuma.lan.LanFunctions.SetAppearance"
-        },
-        {
-            "name": "Lan.Thumbnail",
-            "ios": "LanFunctions.Thumbnail",
-            "android": "com.tuma.lan.LanFunctions.Thumbnail"
+            "description": "Whether the Wi-Fi radio is on (Android; always true on iOS)."
         },
         {
             "name": "Lan.PickFiles",
+            "android": "com.protendai.lan.LanFunctions.PickFiles",
             "ios": "LanFunctions.PickFiles",
-            "android": "com.tuma.lan.LanFunctions.PickFiles"
+            "description": "Utility: multi-select document picker. FilesPicking, then FilesPicked with readable copies."
         },
         {
             "name": "Lan.PickMedia",
+            "android": "com.protendai.lan.LanFunctions.PickMedia",
             "ios": "LanFunctions.PickMedia",
-            "android": "com.tuma.lan.LanFunctions.PickMedia"
+            "description": "Utility: multi-select photo/video picker. FilesPicking, then FilesPicked with readable copies."
         },
         {
-            "name": "Lan.WakeQueue",
-            "ios": "LanFunctions.WakeQueue",
-            "android": "com.tuma.lan.LanFunctions.WakeQueue"
+            "name": "Lan.Thumbnail",
+            "android": "com.protendai.lan.LanFunctions.Thumbnail",
+            "ios": "LanFunctions.Thumbnail",
+            "description": "Utility: write a JPEG preview of an image or video file (or Android content:// URI)."
+        },
+        {
+            "name": "Lan.OpenFile",
+            "android": "com.protendai.lan.LanFunctions.OpenFile",
+            "ios": "LanFunctions.OpenFile",
+            "description": "Utility: open a received file in the system viewer (Android intent chooser, iOS Quick Look)."
         }
     ],
     "events": [
-        "Tuma\\Lan\\Events\\PeerFound",
-        "Tuma\\Lan\\Events\\PeerLost",
-        "Tuma\\Lan\\Events\\UploadRequested",
-        "Tuma\\Lan\\Events\\UploadProgress",
-        "Tuma\\Lan\\Events\\UploadComplete",
-        "Tuma\\Lan\\Events\\SessionCancelled",
-        "Tuma\\Lan\\Events\\ServerError",
-        "Tuma\\Lan\\Events\\FilesPicking",
-        "Tuma\\Lan\\Events\\FilesPicked"
+        "Protendai\\Lan\\Events\\PeerFound",
+        "Protendai\\Lan\\Events\\UploadRequested",
+        "Protendai\\Lan\\Events\\UploadProgress",
+        "Protendai\\Lan\\Events\\UploadComplete",
+        "Protendai\\Lan\\Events\\SessionCancelled",
+        "Protendai\\Lan\\Events\\ServerError",
+        "Protendai\\Lan\\Events\\FilesPicking",
+        "Protendai\\Lan\\Events\\FilesPicked"
     ],
     "android": {
+        "min_version": 29,
         "permissions": [
             "android.permission.INTERNET",
             "android.permission.ACCESS_NETWORK_STATE",
@@ -105,21 +138,17 @@
             "implementation": [
                 "org.nanohttpd:nanohttpd:2.3.1"
             ]
-        },
-        "min_version": 26
+        }
     },
     "ios": {
+        "min_version": "15.0",
         "info_plist": {
-            "NSLocalNetworkUsageDescription": "Tumira finds nearby devices on your Wi-Fi to send and receive files.",
-            "NSBonjourServices": [
-                "_tumira._tcp"
-            ],
-            "UIFileSharingEnabled": true,
-            "LSSupportsOpeningDocumentsInPlace": true
+            "NSLocalNetworkUsageDescription": "This app looks for nearby devices on your Wi-Fi network to send and receive files."
         },
-        "min_version": 18
+        "dependencies": {
+            "swift_packages": [],
+            "pods": []
+        }
     },
-    "hooks": {
-        "post_compile": "tuma:lan:privacy-manifest"
-    }
+    "service_provider": "Protendai\\Lan\\LanServiceProvider"
 }

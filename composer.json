@@ -1,25 +1,59 @@
 {
-    "name": "tuma/mobile-lan",
-    "description": "Tumira LAN discovery and receive listener for NativePHP Mobile.",
+    "name": "protendai/nativephp-lan",
+    "description": "Local-network file transfer for NativePHP Mobile v4 (iOS + Android): device discovery by UDP multicast and subnet probing, and an embedded HTTP receive server that streams uploads to disk, with PHP deciding who may send.",
     "type": "nativephp-plugin",
     "license": "MIT",
+    "keywords": ["nativephp", "nativephp-plugin", "laravel", "mobile", "lan", "wifi", "file-transfer", "discovery", "localsend", "multicast"],
+    "homepage": "https://github.com/protendai/nativephp-lan",
+    "support": {
+        "issues": "https://github.com/protendai/nativephp-lan/issues",
+        "source": "https://github.com/protendai/nativephp-lan"
+    },
+    "authors": [
+        {
+            "name": "Tendai Karuma",
+            "email": "karumatendai@gmail.com"
+        }
+    ],
     "require": {
-        "php": "^8.2"
+        "php": "^8.3",
+        "nativephp/mobile": "^4.0"
+    },
+    "require-dev": {
+        "laravel/framework": "^12.0|^13.0",
+        "pestphp/pest": "^3.0|^4.0|^5.0"
     },
     "autoload": {
         "psr-4": {
-            "Tuma\\Lan\\": "src/"
+            "Protendai\\Lan\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Protendai\\Lan\\Tests\\": "tests/"
         }
     },
     "extra": {
         "laravel": {
             "providers": [
-                "Tuma\\Lan\\LanServiceProvider"
-            ]
+                "Protendai\\Lan\\LanServiceProvider"
+            ],
+            "aliases": {
+                "Lan": "Protendai\\Lan\\Facades\\Lan"
+            }
         },
         "nativephp": {
             "manifest": "nativephp.json"
         }
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "sort-packages": true
     },
     "minimum-stability": "stable",
     "prefer-stable": true

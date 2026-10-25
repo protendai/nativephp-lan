@@ -1,55 +1,31 @@
 <?php
 
-namespace Tuma\Lan;
+namespace Protendai\Lan;
 
 use Illuminate\Support\ServiceProvider;
 use Native\Mobile\Testing\FakeBridge;
-use PHPUnit\Framework\Assert;
+use Protendai\Lan\Testing\LanMacros;
 
 class LanServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->singleton('tuma.lan', fn (): Lan => new Lan);
+        $this->mergeConfigFrom(__DIR__.'/../config/lan.php', 'lan');
+
+        $this->app->singleton(Lan::class, fn ($app): Lan => new Lan((array) $app['config']->get('lan', [])));
+
+        // Test sugar (withLocalIp(), assertRespondedTo() ...), only on a core with a macroable FakeBridge.
+        if (class_exists(FakeBridge::class) && method_exists(FakeBridge::class, 'macro')) {
+            LanMacros::register();
+        }
     }
 
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
-            $this->commands([Commands\CopyPrivacyManifest::class]);
+            $this->publishes([
+                __DIR__.'/../config/lan.php' => config_path('lan.php'),
+            ], 'lan-config');
         }
-
-        $this->registerFakeBridgeMacros();
-    }
-
-    /**
-     * Test helpers for screens that use the plugin:
-     *
-     *   Native::fakeBridge()->withLocalIp('192.168.1.10');
-     *   Native::fakeBridge()->assertRespondedTo('req-1', 200);
-     */
-    private function registerFakeBridgeMacros(): void
-    {
-        if (! class_exists(FakeBridge::class) || FakeBridge::hasMacro('withLocalIp')) {
-            return;
-        }
-
-        FakeBridge::macro('withLocalIp', function (string $ip): FakeBridge {
-            /** @var FakeBridge $this */
-            return $this->respondTo('Lan.LocalIp', ['ip' => $ip]);
-        });
-
-        FakeBridge::macro('assertRespondedTo', function (string $requestId, int $status): FakeBridge {
-            /** @var FakeBridge $this */
-            $matching = array_filter(
-                $this->callsTo('Lan.Respond'),
-                fn (array $call): bool => ($call['params']['requestId'] ?? null) === $requestId
-                    && (int) ($call['params']['status'] ?? 0) === $status,
-            );
-
-            Assert::assertNotEmpty($matching, "Expected Lan.Respond for request [{$requestId}] with status [{$status}].");
-
-            return $this;
-        });
     }
 }

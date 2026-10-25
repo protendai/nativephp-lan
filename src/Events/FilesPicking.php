@@ -1,6 +1,6 @@
 <?php
 
-namespace Tuma\Lan\Events;
+namespace Protendai\Lan\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 

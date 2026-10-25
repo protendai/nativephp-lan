@@ -1,10 +1,14 @@
 <?php
 
-namespace Tuma\Lan\Events;
+namespace Protendai\Lan\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
+/**
+ * One file arrived completely. $path is a file path, or on Android with a
+ * public folder a content:// URI in Downloads.
+ */
 class UploadComplete
 {
     use Dispatchable, SerializesModels;

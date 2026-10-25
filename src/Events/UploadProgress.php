@@ -1,10 +1,13 @@
 <?php
 
-namespace Tuma\Lan\Events;
+namespace Protendai\Lan\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
+/**
+ * Bytes received so far for one file, at most twice a second.
+ */
 class UploadProgress
 {
     use Dispatchable, SerializesModels;
