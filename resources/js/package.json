@@ -1,0 +1,18 @@
+{
+    "name": "@protendai/nativephp-lan",
+    "version": "1.0.0",
+    "description": "JavaScript bindings for protendai/nativephp-lan (NativePHP Mobile local-network file transfer).",
+    "type": "module",
+    "main": "index.js",
+    "types": "index.d.ts",
+    "private": false,
+    "license": "MIT",
+    "author": "Tendai Karuma <karumatendai@gmail.com>",
+    "homepage": "https://github.com/protendai/nativephp-lan",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/protendai/nativephp-lan.git",
+        "directory": "resources/js"
+    },
+    "files": ["index.js", "index.d.ts"]
+}
